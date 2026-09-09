@@ -9,11 +9,12 @@
  submitExam(examID)
  getFinalExamResult(examID)
  getDetailedExamReview(examID)
+ getExamHierarchy()
 */
 
 // Paste the deployed Google Apps Script Web App URL here.
 // Example: https://script.google.com/macros/s/DEPLOYMENT_ID/exec
-const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxMu9_MffCv1JwBdjPARduw-4UtWGgjj1K7tSJhjNaTW7yKqLNxV58NgeMZwCQ3R3jaBA/exec";
+const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyB2peSdXKhgFg9JdmbPV-dh1GKIaqlQL58aeS-sXM_TJMLr64XUqFUsxRQK75scqhsGg/exec";
 
 const state = {
   examID:null, exam:null, current:1, answers:{}, timer:null,
@@ -21,6 +22,74 @@ const state = {
 };
 
 const $ = id => document.getElementById(id);
+const hierarchy = {
+  streams: [],
+  yearsByStream: {},
+  unitsByStreamYear: {},
+  chaptersByStreamYearUnit: {}
+};
+
+function setOptions(selectId, values, placeholder, disabled=false){
+  const select = $(selectId);
+  select.innerHTML = `<option value="">${placeholder}</option>`;
+  (values || []).forEach(value => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = value;
+    select.appendChild(option);
+  });
+  select.disabled = disabled || !(values && values.length);
+}
+
+function hierarchyKey(stream, year, unit){
+  return [stream, year, unit].map(x => String(x || "").trim()).join("|||");
+}
+
+async function loadExamHierarchy(){
+  loading(true,"LOADING EXAM CATALOG…");
+  try{
+    const data = await gas("getExamHierarchy",[]);
+    hierarchy.streams = Array.isArray(data.streams) ? data.streams : [];
+    hierarchy.yearsByStream = data.yearsByStream || {};
+    hierarchy.unitsByStreamYear = data.unitsByStreamYear || {};
+    hierarchy.chaptersByStreamYearUnit = data.chaptersByStreamYearUnit || {};
+
+    setOptions("stream", hierarchy.streams, "SELECT STREAM", false);
+    setOptions("year", [], "SELECT YEAR", true);
+    setOptions("unit", [], "SELECT UNIT", true);
+    setOptions("chapter", [], "SELECT CHAPTER", true);
+  }catch(err){
+    error("startError", `Unable to load Stream / Unit / Chapter list. ${err.message}`);
+  }finally{
+    loading(false);
+  }
+}
+
+function wireHierarchyDropdowns(){
+  $("stream").addEventListener("change",()=>{
+    const stream=$("stream").value;
+    setOptions("year", hierarchy.yearsByStream[stream] || [], "SELECT YEAR", !stream);
+    setOptions("unit", [], "SELECT UNIT", true);
+    setOptions("chapter", [], "SELECT CHAPTER", true);
+  });
+
+  $("year").addEventListener("change",()=>{
+    const stream=$("stream").value;
+    const year=$("year").value;
+    const key=hierarchyKey(stream,year,"");
+    setOptions("unit", hierarchy.unitsByStreamYear[key] || [], "SELECT UNIT", !stream || !year);
+    setOptions("chapter", [], "SELECT CHAPTER", true);
+  });
+
+  $("unit").addEventListener("change",()=>{
+    const stream=$("stream").value;
+    const year=$("year").value;
+    const unit=$("unit").value;
+    const key=hierarchyKey(stream,year,unit);
+    setOptions("chapter", hierarchy.chaptersByStreamYearUnit[key] || [], "SELECT CHAPTER", !stream || !year || !unit);
+  });
+}
+
 const show = id => { document.querySelectorAll(".screen").forEach(x=>x.classList.remove("active")); $(id).classList.add("active"); };
 const loading = (on,msg="CONNECTING…") => { $("loadingText").textContent=msg; $("loading").classList.toggle("hidden",!on); };
 const error = (id,msg) => { const e=$(id); e.textContent=msg; e.classList.toggle("hidden",!msg); };
@@ -45,6 +114,9 @@ async function gas(fn,args=[]){
 function normalizeExam(exam){
   return exam || {};
 }
+
+wireHierarchyDropdowns();
+loadExamHierarchy();
 
 $("startForm").addEventListener("submit",async e=>{
   e.preventDefault(); error("startError","");
