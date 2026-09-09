@@ -140,7 +140,7 @@ function toast(msg) {
 function assertConfig() {
   if (
     !GAS_WEB_APP_URL ||
-    GAS_WEB_APP_URL.includes("PASTE_YOUR")
+    GAS_WEB_APP_URL.includes("https://script.google.com/macros/s/AKfycbyB2peSdXKhgFg9JdmbPV-dh1GKIaqlQL58aeS-sXM_TJMLr64XUqFUsxRQK75scqhsGg/exec")
   ) {
     throw new Error(
       "Configure GAS_WEB_APP_URL in app.js before starting the exam."
