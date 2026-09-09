@@ -58,10 +58,10 @@ async function loadExamHierarchy(){
     // }
     // Keep the frontend's internal names separate from the backend
     // names so the rest of the UI remains clean and unchanged.
-    hierarchy.streams = Array.isArray(data.streams) ? data.streams : [];
-    hierarchy.yearsByStream = data.years || {};
-    hierarchy.unitsByStreamYear = data.units || {};
-    hierarchy.chaptersByStreamYearUnit = data.chapters || {};
+   hierarchy.streams = data.streams || [];
+hierarchy.yearsByStream = data.years || {};
+hierarchy.unitsByStreamYear = data.units || {};
+hierarchy.chaptersByStreamYearUnit = data.chapters || {};
 
     setOptions("stream", hierarchy.streams, "SELECT STREAM", false);
     setOptions("year", [], "SELECT YEAR", true);
