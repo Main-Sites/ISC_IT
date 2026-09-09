@@ -49,16 +49,26 @@ async function loadExamHierarchy(){
   loading(true,"LOADING EXAM CATALOG…");
   try{
     const data = await gas("getExamHierarchy",[]);
+    // getExamHierarchy() returns the verified backend structure:
+    // {
+    //   streams: [...],
+    //   years: {...},
+    //   units: {...},
+    //   chapters: {...}
+    // }
+    // Keep the frontend's internal names separate from the backend
+    // names so the rest of the UI remains clean and unchanged.
     hierarchy.streams = Array.isArray(data.streams) ? data.streams : [];
-    hierarchy.yearsByStream = data.yearsByStream || {};
-    hierarchy.unitsByStreamYear = data.unitsByStreamYear || {};
-    hierarchy.chaptersByStreamYearUnit = data.chaptersByStreamYearUnit || {};
+    hierarchy.yearsByStream = data.years || {};
+    hierarchy.unitsByStreamYear = data.units || {};
+    hierarchy.chaptersByStreamYearUnit = data.chapters || {};
 
     setOptions("stream", hierarchy.streams, "SELECT STREAM", false);
     setOptions("year", [], "SELECT YEAR", true);
     setOptions("unit", [], "SELECT UNIT", true);
     setOptions("chapter", [], "SELECT CHAPTER", true);
   }catch(err){
+    console.error("getExamHierarchy failed:", err);
     error("startError", `Unable to load Stream / Unit / Chapter list. ${err.message}`);
   }finally{
     loading(false);
@@ -98,8 +108,9 @@ function assertConfig(){if(!GAS_WEB_APP_URL || GAS_WEB_APP_URL.includes("PASTE_Y
 
 async function gas(fn,args=[]){
   assertConfig();
-  // JSONP-style GET avoids CORS restrictions on GitHub Pages.
-  // The Apps Script deployment must expose a doGet(e) router.
+  // Call the deployed Apps Script Web App API.
+  // The Apps Script deployment must expose doGet(e) and return
+  // the standard {success:true,data:...} JSON envelope.
   const payload = encodeURIComponent(JSON.stringify({fn,args}));
   const url = `${GAS_WEB_APP_URL}?action=api&payload=${payload}`;
   const r = await fetch(url,{method:"GET",redirect:"follow"});
