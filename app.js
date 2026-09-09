@@ -58,8 +58,7 @@
  * - Do not use /dev.
  * - Do not remove /exec.
  */
-const GAS_WEB_APP_URL =
-  "https://script.google.com/macros/s/AKfycbyB2peSdXKhgFg9JdmbPV-dh1GKIaqlQL58aeS-sXM_TJMLr64XUqFUsxRQK75scqhsGg/exec";
+const GAS_WEB_APP_URL ="https://script.google.com/macros/s/AKfycbyB2peSdXKhgFg9JdmbPV-dh1GKIaqlQL58aeS-sXM_TJMLr64XUqFUsxRQK75scqhsGg/exec";
 
 
 /* ============================================================================
