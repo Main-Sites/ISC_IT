@@ -3131,224 +3131,497 @@ function normalizeResult(
 
 
 /* ============================================================================
- * EXAM SECURITY MONITORING
+ * 23. EXAM SECURITY / BROWSER FOCUS MONITOR
  * ============================================================================
- * VIOLATIONS:
- *   1. Leaving the exam page/tab (document visibility change)
- *   2. Exiting fullscreen during the exam
  *
- * NEVER VIOLATIONS:
- *   - Choosing/selecting an answer
- *   - Window blur/focus
- *   - Right-click
- *   - Restricted keyboard shortcuts
+ * Browser-level exam security:
+ * - Fullscreen request at exam start
+ * - Tab/page visibility detection
+ * - Window/application focus-loss detection
+ * - Fullscreen-exit detection
+ * - Common browser shortcut blocking
+ * - Right-click blocking
+ * - Violation counter and automatic submission
+ * - Optional Apps Script security audit logging
  *
- * Window blur is deliberately ignored because normal exam interaction can
- * trigger blur/focus events and must never be counted as a violation.
- * ========================================================================== */
+ * A normal web page cannot physically lock Windows or guarantee prevention of
+ * Alt+Tab, Task Manager, another application, another monitor, etc.
+ * True OS-level lockdown requires a managed kiosk browser/device.
+ * ========================================================================== *
 
-let examSecurityActive = false;
-let examSecurityViolationCount = 0;
-let examSecurityFullscreenRequested = false;
+const EXAM_SECURITY_CONFIG = {
+  enabled: true,
+  maxViolations: 3,
+  startupGraceMilliseconds: 2500,
+  violationDebounceMilliseconds: 1500,
+  requestFullscreen: true,
+  blockBrowserShortcuts: true,
+  backendLogging: true,
+  backendLogFunction: "logExamSecurityViolation"
+};
 
-function updateSecurityStatusUI() {
-  const el =
-    document.getElementById("securityStatus") ||
-    document.querySelector("[data-security-status]");
+const examSecurity = {
+  active: false,
+  violations: 0,
+  lastViolationAt: 0,
+  startupAt: 0,
+  fullscreenRequested: false,
+  handlersInstalled: false,
+  autoSubmitting: false,
+  boundVisibility: null,
+  boundBlur: null,
+  boundFocus: null,
+  boundFullscreen: null,
+  boundKeydown: null,
+  boundContextMenu: null,
+  boundBeforeUnload: null
+};
 
-  if (el) {
-    el.textContent =
-      examSecurityViolationCount > 0
-        ? `Security violations: ${examSecurityViolationCount}`
-        : "Exam security active";
+function isExamSecurityActive() {
+  return (
+    EXAM_SECURITY_CONFIG.enabled === true &&
+    examSecurity.active === true &&
+    !!state.examID &&
+    state.submitted === false &&
+    state.submitting === false
+  );
+}
+
+function ensureExamSecurityUI() {
+  if ($("nootechSecurityStatus")) return;
+
+  const examScreen = $("examScreen");
+  if (!examScreen) return;
+
+  const status = document.createElement("div");
+  status.id = "nootechSecurityStatus";
+
+  status.innerHTML = `
+    <span class="nootech-security-dot"></span>
+    <span class="nootech-security-text">EXAM SECURITY ACTIVE</span>
+    <span class="nootech-security-count">VIOLATIONS: 0/${EXAM_SECURITY_CONFIG.maxViolations}</span>
+  `;
+
+  status.style.cssText = `
+    position:fixed;
+    right:16px;
+    bottom:16px;
+    z-index:9998;
+    display:flex;
+    align-items:center;
+    gap:8px;
+    padding:9px 12px;
+    border:1px solid rgba(255,255,255,.18);
+    border-radius:10px;
+    background:rgba(8,12,20,.92);
+    color:#fff;
+    font:700 11px/1.2 Arial,sans-serif;
+    letter-spacing:.5px;
+    box-shadow:0 8px 24px rgba(0,0,0,.28);
+    pointer-events:none;
+    backdrop-filter:blur(8px);
+  `;
+
+  const dot = status.querySelector(".nootech-security-dot");
+  if (dot) {
+    dot.style.cssText = `
+      width:8px;height:8px;border-radius:50%;
+      background:#22c55e;
+      box-shadow:0 0 10px rgba(34,197,94,.8);
+      flex:0 0 auto;
+    `;
+  }
+
+  examScreen.appendChild(status);
+}
+
+function updateExamSecurityUI(message = "") {
+  const status = $("nootechSecurityStatus");
+  if (!status) return;
+
+  const countNode = status.querySelector(".nootech-security-count");
+  const textNode = status.querySelector(".nootech-security-text");
+  const dot = status.querySelector(".nootech-security-dot");
+
+  if (countNode) {
+    countNode.textContent =
+      `VIOLATIONS: ${examSecurity.violations}/${EXAM_SECURITY_CONFIG.maxViolations}`;
+  }
+
+  if (message && textNode) {
+    textNode.textContent = message;
+  }
+
+  if (dot) {
+    if (examSecurity.violations >= EXAM_SECURITY_CONFIG.maxViolations) {
+      dot.style.background = "#ef4444";
+      dot.style.boxShadow = "0 0 10px rgba(239,68,68,.9)";
+    } else if (examSecurity.violations > 0) {
+      dot.style.background = "#f59e0b";
+      dot.style.boxShadow = "0 0 10px rgba(245,158,11,.9)";
+    } else {
+      dot.style.background = "#22c55e";
+      dot.style.boxShadow = "0 0 10px rgba(34,197,94,.8)";
+    }
   }
 }
 
-async function registerExamSecurityViolation(type, details) {
-  if (!examSecurityActive) return;
-
-  examSecurityViolationCount++;
-
-  updateSecurityStatusUI();
-
-  console.warn(
-    "EXAM SECURITY VIOLATION:",
-    type,
-    details || ""
-  );
-
-  // Use the existing backend security logger when available.
+function showExamSecurityWarning(message) {
   try {
-    if (typeof gas === "function" && state.examID) {
-      await gas(
-        "logExamSecurityViolation",
-        [{
-          examID: state.examID,
-          violationType: String(type || "UNKNOWN"),
-          details: String(details || ""),
-          timestamp: new Date().toISOString()
-        }],
-        {
-          maxAttempts: 1,
-          timeoutMilliseconds: 10000
-        }
-      );
-    }
+    toast(message);
   } catch (err) {
-    // Security logging failure must never stop the examination.
-    console.warn(
-      "Security violation could not be logged:",
-      err
+    console.warn("Security warning:", message);
+  }
+}
+
+async function requestExamFullscreen() {
+  if (
+    !EXAM_SECURITY_CONFIG.requestFullscreen ||
+    !document.documentElement ||
+    typeof document.documentElement.requestFullscreen !== "function"
+  ) {
+    return false;
+  }
+
+  if (document.fullscreenElement) {
+    examSecurity.fullscreenRequested = true;
+    return true;
+  }
+
+  try {
+    await document.documentElement.requestFullscreen();
+    examSecurity.fullscreenRequested = true;
+    return true;
+  } catch (err) {
+    console.warn("NOOTECH fullscreen request was denied:", err);
+    return false;
+  }
+}
+
+function securityEventDescription(type) {
+  const descriptions = {
+    TAB_SWITCH: "Browser tab or page visibility changed.",
+    WINDOW_BLUR: "Exam browser window lost focus.",
+    FULLSCREEN_EXIT: "Browser fullscreen mode was exited.",
+    SHORTCUT: "A restricted browser shortcut was pressed.",
+    CONTEXT_MENU: "Context menu was requested during the exam."
+  };
+
+  return descriptions[type] || "Exam security policy was triggered.";
+}
+
+async function logExamSecurityEvent(type, extra = {}) {
+  const payload = {
+    examID: state.examID || "",
+    studentName:
+      state.exam?.studentName ||
+      $("studentName")?.value?.trim() ||
+      "",
+    violationNumber: examSecurity.violations,
+    eventType: type,
+    eventDescription: securityEventDescription(type),
+    eventTime: new Date().toISOString(),
+    visibilityState: document.visibilityState,
+    fullscreen: !!document.fullscreenElement,
+    userAgent: navigator.userAgent,
+    ...extra
+  };
+
+  console.warn("NOOTECH EXAM SECURITY EVENT:", payload);
+
+  if (!EXAM_SECURITY_CONFIG.backendLogging || !state.examID) return;
+
+  try {
+    await gas(
+      EXAM_SECURITY_CONFIG.backendLogFunction,
+      [payload],
+      { maxAttempts: 1, timeoutMilliseconds: 10000 }
+    );
+  } catch (err) {
+    console.warn("NOOTECH security event could not be logged:", err);
+  }
+}
+
+function registerExamSecurityViolation(type, extra = {}) {
+  if (!isExamSecurityActive()) return;
+
+  const now = Date.now();
+
+  if (
+    now - examSecurity.startupAt <
+    EXAM_SECURITY_CONFIG.startupGraceMilliseconds
+  ) {
+    return;
+  }
+
+  if (
+    now - examSecurity.lastViolationAt <
+    EXAM_SECURITY_CONFIG.violationDebounceMilliseconds
+  ) {
+    return;
+  }
+
+  examSecurity.lastViolationAt = now;
+  examSecurity.violations += 1;
+
+  updateExamSecurityUI("SECURITY WARNING");
+  void logExamSecurityEvent(type, extra);
+
+  const count = examSecurity.violations;
+  const maximum = EXAM_SECURITY_CONFIG.maxViolations;
+
+  if (count >= maximum) {
+    if (examSecurity.autoSubmitting) return;
+
+    examSecurity.autoSubmitting = true;
+    updateExamSecurityUI("EXAM TERMINATING");
+
+    showExamSecurityWarning(
+      "SECURITY VIOLATION LIMIT REACHED — YOUR EXAM IS BEING SUBMITTED."
+    );
+
+    window.setTimeout(() => {
+      if (!state.submitted && !state.submitting && state.examID) {
+        void doSubmit(true);
+      }
+    }, 700);
+
+    return;
+  }
+
+  if (count === maximum - 1) {
+    showExamSecurityWarning(
+      `FINAL SECURITY WARNING — LEAVE THE EXAM WINDOW AGAIN AND THE EXAM WILL BE AUTO-SUBMITTED. (${count}/${maximum})`
+    );
+  } else {
+    showExamSecurityWarning(
+      `SECURITY WARNING — PLEASE REMAIN ON THE EXAM SCREEN. (${count}/${maximum})`
     );
   }
 }
 
 function handleExamVisibilityChange() {
-  if (
-    examSecurityActive &&
-    document.visibilityState === "hidden"
-  ) {
-    registerExamSecurityViolation(
-      "TAB_OR_PAGE_SWITCH",
-      "Exam page became hidden."
-    );
-  }
-}
+  if (!isExamSecurityActive()) return;
 
-function handleExamFullscreenChange() {
-  if (
-    examSecurityActive &&
-    !document.fullscreenElement
-  ) {
-    registerExamSecurityViolation(
-      "FULLSCREEN_EXIT",
-      "Candidate exited fullscreen mode."
-    );
+  if (document.visibilityState !== "visible") {
+    registerExamSecurityViolation("TAB_SWITCH");
   }
 }
 
 function handleExamWindowBlur() {
-  // IMPORTANT:
-  // Blur is NOT a security violation.
-  // Answer selection and normal browser interaction can cause blur/focus.
-  updateSecurityStatusUI();
+  /*
+   * Do NOT count blur as a violation. Clicking normal exam controls can
+   * legitimately cause focus changes in the browser.
+   */
+  if (!isExamSecurityActive()) return;
+  updateExamSecurityUI("SECURITY MONITORING ACTIVE");
 }
 
-async function enterExamFullscreen() {
-  try {
-    if (
-      document.documentElement.requestFullscreen &&
-      !document.fullscreenElement
-    ) {
-      await document.documentElement.requestFullscreen();
-      examSecurityFullscreenRequested = true;
-    }
-  } catch (err) {
-    console.warn(
-      "Fullscreen could not be entered:",
-      err
-    );
+function handleExamWindowFocus() {
+  if (!isExamSecurityActive()) return;
+
+  updateExamSecurityUI(
+    examSecurity.violations > 0
+      ? "SECURITY MONITORING ACTIVE"
+      : "EXAM SECURITY ACTIVE"
+  );
+}
+
+function handleExamFullscreenChange() {
+  if (!isExamSecurityActive()) return;
+  if (!examSecurity.fullscreenRequested) return;
+
+  if (!document.fullscreenElement) {
+    registerExamSecurityViolation("FULLSCREEN_EXIT");
   }
 }
 
-function exitExamFullscreen() {
-  try {
-    if (document.fullscreenElement) {
-      document.exitFullscreen().catch(() => {});
-    }
-  } catch (err) {
-    console.warn(
-      "Fullscreen exit failed:",
-      err
-    );
+function handleExamRestrictedKeyboard(event) {
+  if (
+    !isExamSecurityActive() ||
+    !EXAM_SECURITY_CONFIG.blockBrowserShortcuts
+  ) {
+    return;
   }
+
+  const key = String(event.key || "").toLowerCase();
+  const ctrl = event.ctrlKey || event.metaKey;
+  const alt = event.altKey;
+  const shift = event.shiftKey;
+
+  let restricted = false;
+
+  if (ctrl && (key === "t" || key === "n" || key === "w")) {
+    restricted = true;
+  }
+
+  if (ctrl && shift && key === "t") {
+    restricted = true;
+  }
+
+  if (
+    key === "f12" ||
+    (ctrl && shift && (key === "i" || key === "j" || key === "c")) ||
+    (ctrl && key === "u")
+  ) {
+    restricted = true;
+  }
+
+  if (alt && (key === "arrowleft" || key === "arrowright")) {
+    restricted = true;
+  }
+
+  if (key === "f5" || (ctrl && key === "r")) {
+    restricted = true;
+  }
+
+  if (!restricted) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+
+  /* Block the shortcut without counting it as a violation. */
+  updateExamSecurityUI("SECURITY MONITORING ACTIVE");
 }
 
-function setupExamSecurity() {
-  if (examSecurityActive) return;
+function handleExamContextMenu(event) {
+  if (!isExamSecurityActive()) return;
 
-  examSecurityActive = true;
-  examSecurityViolationCount = 0;
+  /* Disable context menu, but never count it as a security violation. */
+  event.preventDefault();
+}
+
+function handleExamBeforeUnload(event) {
+  if (!isExamSecurityActive()) return;
+
+  event.preventDefault();
+  event.returnValue = "";
+}
+
+function installExamSecurityListeners() {
+  if (examSecurity.handlersInstalled) return;
+
+  examSecurity.boundVisibility = handleExamVisibilityChange;
+  examSecurity.boundBlur = handleExamWindowBlur;
+  examSecurity.boundFocus = handleExamWindowFocus;
+  examSecurity.boundFullscreen = handleExamFullscreenChange;
+  examSecurity.boundKeydown = handleExamRestrictedKeyboard;
+  examSecurity.boundContextMenu = handleExamContextMenu;
+  examSecurity.boundBeforeUnload = handleExamBeforeUnload;
 
   document.addEventListener(
     "visibilitychange",
-    handleExamVisibilityChange
+    examSecurity.boundVisibility,
+    true
   );
+
+  window.addEventListener("blur", examSecurity.boundBlur, true);
+  window.addEventListener("focus", examSecurity.boundFocus, true);
 
   document.addEventListener(
     "fullscreenchange",
-    handleExamFullscreenChange
-  );
-
-  window.addEventListener(
-    "blur",
-    handleExamWindowBlur
-  );
-
-  // These are prevention-only. They are NOT violations.
-  document.addEventListener(
-    "contextmenu",
-    function (event) {
-      if (examSecurityActive) {
-        event.preventDefault();
-      }
-    }
+    examSecurity.boundFullscreen,
+    true
   );
 
   document.addEventListener(
     "keydown",
-    function (event) {
-      if (!examSecurityActive) return;
-
-      const blocked =
-        event.key === "F12" ||
-        (event.ctrlKey && event.shiftKey &&
-          ["I", "J", "C"].includes(
-            String(event.key).toUpperCase()
-          )) ||
-        (event.ctrlKey &&
-          ["U"].includes(
-            String(event.key).toUpperCase()
-          ));
-
-      if (blocked) {
-        event.preventDefault();
-        // Deliberately NOT a violation.
-      }
-    }
+    examSecurity.boundKeydown,
+    true
   );
 
-  updateSecurityStatusUI();
-
-  // Request fullscreen after the exam screen is active.
-  setTimeout(
-    () => enterExamFullscreen(),
-    250
+  document.addEventListener(
+    "contextmenu",
+    examSecurity.boundContextMenu,
+    true
   );
+
+  window.addEventListener(
+    "beforeunload",
+    examSecurity.boundBeforeUnload,
+    true
+  );
+
+  examSecurity.handlersInstalled = true;
 }
 
-function cleanupExamSecurity() {
-  if (!examSecurityActive) return;
-
-  examSecurityActive = false;
+function uninstallExamSecurityListeners() {
+  if (!examSecurity.handlersInstalled) return;
 
   document.removeEventListener(
     "visibilitychange",
-    handleExamVisibilityChange
+    examSecurity.boundVisibility,
+    true
   );
+
+  window.removeEventListener("blur", examSecurity.boundBlur, true);
+  window.removeEventListener("focus", examSecurity.boundFocus, true);
 
   document.removeEventListener(
     "fullscreenchange",
-    handleExamFullscreenChange
+    examSecurity.boundFullscreen,
+    true
+  );
+
+  document.removeEventListener(
+    "keydown",
+    examSecurity.boundKeydown,
+    true
+  );
+
+  document.removeEventListener(
+    "contextmenu",
+    examSecurity.boundContextMenu,
+    true
   );
 
   window.removeEventListener(
-    "blur",
-    handleExamWindowBlur
+    "beforeunload",
+    examSecurity.boundBeforeUnload,
+    true
   );
 
-  exitExamFullscreen();
+  examSecurity.handlersInstalled = false;
 }
+
+function activateExamSecurity() {
+  if (!EXAM_SECURITY_CONFIG.enabled || !state.examID) return;
+
+  examSecurity.active = true;
+  examSecurity.violations = 0;
+  examSecurity.lastViolationAt = 0;
+  examSecurity.startupAt = Date.now();
+  examSecurity.fullscreenRequested = false;
+  examSecurity.autoSubmitting = false;
+
+  ensureExamSecurityUI();
+  updateExamSecurityUI("EXAM SECURITY ACTIVE");
+  installExamSecurityListeners();
+
+  if (EXAM_SECURITY_CONFIG.requestFullscreen) {
+    void requestExamFullscreen();
+  }
+}
+
+function deactivateExamSecurity() {
+  examSecurity.active = false;
+  uninstallExamSecurityListeners();
+  examSecurity.autoSubmitting = false;
+
+  const status = $("nootechSecurityStatus");
+  if (status) status.remove();
+
+  if (
+    document.fullscreenElement &&
+    typeof document.exitFullscreen === "function"
+  ) {
+    document.exitFullscreen().catch(() => {});
+  }
+}
+
+console.info(
+  "NOOTECH EXAM SECURITY: BROWSER FOCUS / TAB / FULLSCREEN MONITOR READY"
+);
 
 
 /* ============================================================================
