@@ -3147,7 +3147,7 @@ function isGoogleReviewConfigured() {
     typeof GOOGLE_REVIEW_URL === "string" &&
     GOOGLE_REVIEW_URL.trim() !== "" &&
     !GOOGLE_REVIEW_URL.includes(
-      "PASTE_YOUR_GOOGLE_REVIEW_LINK_HERE"
+      "https://g.page/r/CSPIVNfIi8ukEBM/review"
     )
   );
 
