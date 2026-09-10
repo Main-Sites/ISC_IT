@@ -58,7 +58,8 @@
  * - Do not use /dev.
  * - Do not remove /exec.
  */
-const GAS_WEB_APP_URL ="https://script.google.com/macros/s/AKfycbyB2peSdXKhgFg9JdmbPV-dh1GKIaqlQL58aeS-sXM_TJMLr64XUqFUsxRQK75scqhsGg/exec";
+const GAS_WEB_APP_URL =
+  "https://script.google.com/macros/s/AKfycbyB2peSdXKhgFg9JdmbPV-dh1GKIaqlQL58aeS-sXM_TJMLr64XUqFUsxRQK75scqhsGg/exec";
 
 
 /* ============================================================================
@@ -1637,6 +1638,11 @@ async function initializeExam(
       "examScreen"
     );
 
+    /*
+     * EXAM SECURITY
+     * Activate browser security immediately after the exam screen opens.
+     */
+    activateExamSecurity();
 
     loading(
       true,
@@ -3013,6 +3019,11 @@ async function doSubmit(
     state.submitted =
       true;
 
+    /*
+     * EXAM SECURITY
+     * Security monitoring is active only while the examination is active.
+     */
+    deactivateExamSecurity();
 
     window.clearInterval(
       state.timer
@@ -3934,4 +3945,2056 @@ loadExamHierarchy();
 
 console.info(
   "NOOTECH Online Exam frontend initialized."
+);
+
+
+/* ============================================================================
+ * 22. POST-SUBMISSION GOOGLE REVIEW + RESULT ENHANCEMENT
+ * ============================================================================
+ *
+ * FINAL CANDIDATE FLOW
+ * ----------------------------------------------------------------------------
+ *
+ * EXAM SUBMIT
+ *     ↓
+ * RESULT SCREEN
+ *     ↓
+ * SCORE / PERCENTAGE / CORRECT / WRONG / UNATTEMPTED
+ *     ↓
+ * GOOGLE BUSINESS REVIEW GATE
+ *     ↓
+ * CANDIDATE OPENS GOOGLE REVIEW
+ *     ↓
+ * CANDIDATE CONFIRMS REVIEW SUBMISSION
+ *     ↓
+ * DETAILED QUESTION REVIEW
+ *
+ * IMPORTANT:
+ * Google does not expose a reliable client-side signal proving that a review
+ * was actually published. Therefore the application uses an explicit
+ * confirmation gate. The detailed review cannot be opened through the UI until
+ * the candidate checks the confirmation box.
+ *
+ * REQUIRED CONFIGURATION:
+ * Set GOOGLE_REVIEW_URL to the direct Google "Write a review" URL for the
+ * business. This is intentionally separate from the Apps Script URL.
+ * ========================================================================== */
+
+
+/* ============================================================================
+ * 22.1 GOOGLE BUSINESS REVIEW URL
+ * ========================================================================== */
+
+/*
+ * Replace the value below with your actual Google Business "Write a review"
+ * link.
+ *
+ * Examples:
+ *
+ * https://g.page/r/XXXXXXXXXXXX/review
+ *
+ * OR
+ *
+ * https://search.google.com/local/writereview?placeid=XXXXXXXXXXXX
+ */
+const GOOGLE_REVIEW_URL =
+  "https://g.page/r/CSPIVNfIi8ukEBM/review";
+
+
+/* ============================================================================
+ * 22.2 RESULT NORMALIZATION
+ * ========================================================================== */
+
+/*
+ * The backend may return any of these structures:
+ *
+ * A) { obtainedMarks, totalMarks, percentage, ... }
+ *
+ * B) { result: { obtainedMarks, totalMarks, percentage, ... } }
+ *
+ * C) { summary: { obtainedMarks, totalMarks, percentage, ... } }
+ *
+ * D) { data: { ... } }
+ *
+ * This function safely unwraps all supported structures.
+ */
+function nootechNormalizeFinalResult(response) {
+
+  let result =
+    response &&
+    typeof response === "object"
+      ? response
+      : {};
+
+
+  for (
+    let pass = 0;
+    pass < 4;
+    pass++
+  ) {
+
+    if (
+      result &&
+      result.summary &&
+      typeof result.summary === "object"
+    ) {
+
+      result =
+        result.summary;
+
+      continue;
+
+    }
+
+
+    if (
+      result &&
+      result.result &&
+      typeof result.result === "object"
+    ) {
+
+      result =
+        result.result;
+
+      continue;
+
+    }
+
+
+    if (
+      result &&
+      result.data &&
+      typeof result.data === "object"
+    ) {
+
+      result =
+        result.data;
+
+      continue;
+
+    }
+
+
+    break;
+
+  }
+
+
+  return result || {};
+
+}
+
+
+/* ============================================================================
+ * 22.3 RESULT SCREEN RENDERER — FINAL OVERRIDE
+ * ========================================================================== */
+
+/*
+ * This complete replacement guarantees that the result screen receives the
+ * final score from the completed backend session.
+ *
+ * If submitExam() does not contain the complete score, getFinalExamResult()
+ * is used as a fallback.
+ */
+async function showResult(response) {
+
+  let result =
+    nootechNormalizeFinalResult(
+      response
+    );
+
+
+  /*
+   * ------------------------------------------------------------
+   * Check whether the response actually contains score data.
+   * ------------------------------------------------------------
+   */
+  let obtained =
+    Number(
+      result.obtainedMarks ??
+      result.score
+    );
+
+
+  let total =
+    Number(
+      result.totalMarks
+    );
+
+
+  /*
+   * ------------------------------------------------------------
+   * Fallback to the authoritative final-result endpoint.
+   * ------------------------------------------------------------
+   */
+  if (
+    !Number.isFinite(obtained) ||
+    !Number.isFinite(total)
+  ) {
+
+    try {
+
+      const finalResponse =
+        await gas(
+          "getFinalExamResult",
+          [
+            state.examID
+          ],
+          {
+            maxAttempts: 2,
+            timeoutMilliseconds: 30000
+          }
+        );
+
+
+      result =
+        nootechNormalizeFinalResult(
+          finalResponse
+        );
+
+
+      obtained =
+        Number(
+          result.obtainedMarks ??
+          result.score ??
+          0
+        );
+
+
+      total =
+        Number(
+          result.totalMarks ??
+          0
+        );
+
+    } catch (err) {
+
+      console.error(
+        "Unable to retrieve final result:",
+        err
+      );
+
+
+      /*
+       * Use the examination metadata as a final safe fallback.
+       */
+      obtained =
+        Number(
+          result.obtainedMarks ??
+          result.score ??
+          0
+        );
+
+
+      total =
+        Number(
+          result.totalMarks ??
+          state.exam?.totalMarks ??
+          0
+        );
+
+    }
+
+  }
+
+
+  if (
+    !Number.isFinite(obtained)
+  ) {
+
+    obtained =
+      0;
+
+  }
+
+
+  if (
+    !Number.isFinite(total)
+  ) {
+
+    total =
+      0;
+
+  }
+
+
+  /*
+   * ------------------------------------------------------------
+   * Candidate statistics.
+   * ------------------------------------------------------------
+   */
+  const correct =
+    Number(
+      result.correct ??
+      0
+    );
+
+
+  const wrong =
+    Number(
+      result.wrong ??
+      0
+    );
+
+
+  const unattempted =
+    Number(
+      result.unattempted ??
+      0
+    );
+
+
+  /*
+   * ------------------------------------------------------------
+   * Percentage.
+   *
+   * Backend value is preferred.
+   * Local calculation is only a fallback.
+   * ------------------------------------------------------------
+   */
+  let percentage =
+    Number(
+      result.percentage
+    );
+
+
+  if (
+    !Number.isFinite(
+      percentage
+    )
+  ) {
+
+    percentage =
+      total > 0
+        ? (
+            obtained /
+            total
+          ) *
+          100
+        : 0;
+
+  }
+
+
+  percentage =
+    Math.round(
+      Math.max(
+        0,
+        Math.min(
+          100,
+          percentage
+        )
+      ) *
+      100
+    ) / 100;
+
+
+  /*
+   * ------------------------------------------------------------
+   * Candidate name.
+   * ------------------------------------------------------------
+   */
+  const studentName =
+    String(
+      result.studentName ||
+      state.exam?.studentName ||
+      $("resultStudent")?.textContent ||
+      $("studentName")?.value ||
+      "CANDIDATE"
+    ).trim();
+
+
+  /*
+   * ------------------------------------------------------------
+   * Save complete result in state.
+   * ------------------------------------------------------------
+   */
+  state.exam =
+    {
+      ...(state.exam || {}),
+      ...result,
+
+      studentName:
+        studentName,
+
+      obtainedMarks:
+        obtained,
+
+      totalMarks:
+        total,
+
+      percentage:
+        percentage,
+
+      correct:
+        correct,
+
+      wrong:
+        wrong,
+
+      unattempted:
+        unattempted
+
+    };
+
+
+  /*
+   * ------------------------------------------------------------
+   * Populate every result field.
+   * ------------------------------------------------------------
+   */
+  if ($("resultStudent")) {
+
+    $("resultStudent")
+      .textContent =
+        studentName;
+
+  }
+
+
+  if ($("scorePercent")) {
+
+    $("scorePercent")
+      .textContent =
+        `${percentage}%`;
+
+  }
+
+
+  if ($("scoreValue")) {
+
+    $("scoreValue")
+      .textContent =
+        `${obtained} / ${total}`;
+
+  }
+
+
+  if ($("correctValue")) {
+
+    $("correctValue")
+      .textContent =
+        correct;
+
+  }
+
+
+  if ($("wrongValue")) {
+
+    $("wrongValue")
+      .textContent =
+        wrong;
+
+  }
+
+
+  if ($("unattemptedValue")) {
+
+    $("unattemptedValue")
+      .textContent =
+        unattempted;
+
+  }
+
+
+  /*
+   * ------------------------------------------------------------
+   * Update score-ring CSS custom property.
+   * ------------------------------------------------------------
+   */
+  const scoreRing =
+    document.querySelector(
+      "#resultScreen .score-ring"
+    );
+
+
+  if (scoreRing) {
+
+    scoreRing.style.setProperty(
+      "--score",
+      `${percentage}%`
+    );
+
+    scoreRing.style.setProperty(
+      "--percentage",
+      `${percentage}%`
+    );
+
+  }
+
+
+  /*
+   * Some UI themes use the ring's ::before background instead of
+   * --score. Inject a safe conic-gradient only when required.
+   *
+   * Existing theme colors remain inherited from CSS variables.
+   */
+  if (scoreRing) {
+
+    scoreRing.style.background =
+      `conic-gradient(
+        var(--accent, #00f0ff) ${percentage}%,
+        rgba(255,255,255,.08) ${percentage}% 100%
+      )`;
+
+  }
+
+
+  /*
+   * ------------------------------------------------------------
+   * Change the result button to the mandatory Google review step.
+   * ------------------------------------------------------------
+   */
+  if ($("reviewBtn")) {
+
+    $("reviewBtn")
+      .textContent =
+        "LEAVE GOOGLE REVIEW →";
+
+  }
+
+
+  /*
+   * ------------------------------------------------------------
+   * Show result FIRST.
+   * ------------------------------------------------------------
+   */
+  show(
+    "resultScreen"
+  );
+
+
+  window.scrollTo(
+    {
+      top: 0,
+      behavior: "smooth"
+    }
+  );
+
+
+  console.info(
+    "NOOTECH FINAL RESULT:",
+    {
+      studentName,
+      obtained,
+      total,
+      percentage,
+      correct,
+      wrong,
+      unattempted
+    }
+  );
+
+}
+
+
+/* ============================================================================
+ * 22.4 GOOGLE REVIEW SCREEN CREATOR
+ * ========================================================================== */
+
+/*
+ * Creates the review screen dynamically so index.html does not have to be
+ * modified.
+ */
+function ensureGoogleReviewScreen() {
+
+  if (
+    $("googleReviewScreen")
+  ) {
+
+    return;
+
+  }
+
+
+  const section =
+    document.createElement(
+      "section"
+    );
+
+
+  section.id =
+    "googleReviewScreen";
+
+
+  section.className =
+    "screen";
+
+
+  section.innerHTML =
+    `
+      <div class="google-review-shell">
+
+        <div class="google-review-card panel">
+
+          <div class="google-review-star">
+            ★
+          </div>
+
+          <div class="eyebrow">
+            MISSION FEEDBACK
+          </div>
+
+          <h1>
+            SHARE YOUR
+            <span>EXPERIENCE</span>
+          </h1>
+
+          <p class="google-review-student">
+            Thank you,
+            <strong id="googleReviewStudent">
+              CANDIDATE
+            </strong>
+          </p>
+
+          <div class="google-review-message">
+
+            <h2>
+              ⭐ YOUR FEEDBACK MATTERS
+            </h2>
+
+            <p>
+              Your honest feedback helps NOOTECH improve the
+              learning and examination experience for students.
+            </p>
+
+            <p>
+              Please take a moment to submit your valuable
+              review on our Google Business Profile.
+            </p>
+
+          </div>
+
+          <div class="google-review-actions">
+
+            <button
+              id="openGoogleReviewBtn"
+              class="primary-btn"
+              type="button"
+            >
+              OPEN GOOGLE REVIEW ↗
+            </button>
+
+          </div>
+
+          <div
+            id="googleReviewNotice"
+            class="google-review-notice"
+          >
+            Step 1: Open Google and submit your honest review.
+            Step 2: Return to this examination page.
+            Step 3: Confirm below to unlock your detailed review.
+          </div>
+
+          <label
+            class="google-review-confirm"
+            for="googleReviewConfirmed"
+          >
+
+            <input
+              id="googleReviewConfirmed"
+              type="checkbox"
+            />
+
+            <span>
+              I confirm that I have submitted my valuable
+              review on the NOOTECH Google Business Profile.
+            </span>
+
+          </label>
+
+          <div class="google-review-actions">
+
+            <button
+              id="continueToDetailedReviewBtn"
+              class="primary-btn"
+              type="button"
+              disabled
+            >
+              UNLOCK DETAILED REVIEW →
+            </button>
+
+            <button
+              id="backToResultFromGoogleBtn"
+              class="ghost-btn"
+              type="button"
+            >
+              ← BACK TO RESULT
+            </button>
+
+          </div>
+
+          <div
+            id="googleReviewError"
+            class="error-box hidden"
+          ></div>
+
+        </div>
+
+      </div>
+    `;
+
+
+  document.body.appendChild(
+    section
+  );
+
+
+  /*
+   * ------------------------------------------------------------
+   * Theme-compatible styles.
+   * ------------------------------------------------------------
+   */
+  const style =
+    document.createElement(
+      "style"
+    );
+
+
+  style.id =
+    "nootech-google-review-style";
+
+
+  style.textContent =
+    `
+      #googleReviewScreen {
+        min-height: 100vh;
+        padding: 32px 18px;
+        box-sizing: border-box;
+      }
+
+      .google-review-shell {
+        width: min(760px, 100%);
+        min-height: calc(100vh - 64px);
+        margin: 0 auto;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .google-review-card {
+        width: 100%;
+        padding: clamp(26px, 5vw, 52px);
+        box-sizing: border-box;
+        text-align: center;
+      }
+
+      .google-review-star {
+        width: 78px;
+        height: 78px;
+        margin: 0 auto 18px;
+        display: grid;
+        place-items: center;
+        border-radius: 50%;
+        border: 1px solid rgba(255,255,255,.22);
+        font-size: 38px;
+      }
+
+      .google-review-card h1 {
+        margin: 8px 0 10px;
+      }
+
+      .google-review-card h1 span {
+        display: inline-block;
+      }
+
+      .google-review-student {
+        margin: 0 0 26px;
+        font-size: 1rem;
+      }
+
+      .google-review-message {
+        margin: 0 auto 22px;
+        padding: 22px;
+        text-align: left;
+        border-radius: 16px;
+        border: 1px solid rgba(255,255,255,.14);
+      }
+
+      .google-review-message h2 {
+        margin-top: 0;
+      }
+
+      .google-review-message p {
+        line-height: 1.65;
+      }
+
+      .google-review-actions {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-top: 16px;
+      }
+
+      .google-review-notice {
+        margin: 20px 0;
+        padding: 14px 16px;
+        border-radius: 12px;
+        border: 1px dashed rgba(255,255,255,.22);
+        line-height: 1.55;
+        font-size: .92rem;
+      }
+
+      .google-review-confirm {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        margin: 22px 0;
+        padding: 16px;
+        border-radius: 14px;
+        border: 1px solid rgba(255,255,255,.14);
+        text-align: left;
+        line-height: 1.55;
+        cursor: pointer;
+      }
+
+      .google-review-confirm input {
+        width: 19px;
+        height: 19px;
+        margin-top: 3px;
+        flex: 0 0 auto;
+      }
+
+      #continueToDetailedReviewBtn:disabled {
+        opacity: .45;
+        cursor: not-allowed;
+      }
+
+      .review-student-name {
+        margin-top: 8px;
+        font-size: .95rem;
+        opacity: .86;
+        letter-spacing: .04em;
+      }
+
+      .review-student-name::before {
+        content: "CANDIDATE: ";
+        opacity: .58;
+      }
+    `;
+
+
+  document.head.appendChild(
+    style
+  );
+
+
+  /*
+   * ------------------------------------------------------------
+   * Open Google Business review page.
+   * ------------------------------------------------------------
+   */
+  $("openGoogleReviewBtn")
+    .addEventListener(
+      "click",
+      () => {
+
+        const reviewError =
+          $("googleReviewError");
+
+
+        if (
+          !isGoogleReviewConfigured()
+        ) {
+
+          if (reviewError) {
+
+            reviewError.textContent =
+              "Google Business review link is not configured. " +
+              "Set GOOGLE_REVIEW_URL in app.js.";
+
+            reviewError.classList.remove(
+              "hidden"
+            );
+
+          }
+
+
+          return;
+
+        }
+
+
+        /*
+         * Open in a separate tab so the exam result remains intact.
+         */
+        const opened =
+          window.open(
+            GOOGLE_REVIEW_URL,
+            "_blank",
+            "noopener,noreferrer"
+          );
+
+
+        if (!opened) {
+
+          if (reviewError) {
+
+            reviewError.textContent =
+              "Google review page was blocked by the browser. " +
+              "Please allow pop-ups and try again.";
+
+            reviewError.classList.remove(
+              "hidden"
+            );
+
+          }
+
+
+          return;
+
+        }
+
+
+        if (reviewError) {
+
+          reviewError.textContent =
+            "";
+
+          reviewError.classList.add(
+            "hidden"
+          );
+
+        }
+
+
+        toast(
+          "Google review opened in a new tab."
+        );
+
+      }
+    );
+
+
+  /*
+   * ------------------------------------------------------------
+   * Candidate confirmation checkbox.
+   * ------------------------------------------------------------
+   */
+  $("googleReviewConfirmed")
+    .addEventListener(
+      "change",
+      event => {
+
+        $("continueToDetailedReviewBtn")
+          .disabled =
+            !event.target.checked;
+
+      }
+    );
+
+
+  /*
+   * ------------------------------------------------------------
+   * Unlock detailed review.
+   * ------------------------------------------------------------
+   */
+  $("continueToDetailedReviewBtn")
+    .addEventListener(
+      "click",
+      async () => {
+
+        if (
+          !$("googleReviewConfirmed").checked
+        ) {
+
+          toast(
+            "Please confirm your Google review submission first."
+          );
+
+
+          return;
+
+        }
+
+
+        await openDetailedReview();
+
+      }
+    );
+
+
+  /*
+   * ------------------------------------------------------------
+   * Return to result.
+   * ------------------------------------------------------------
+   */
+  $("backToResultFromGoogleBtn")
+    .addEventListener(
+      "click",
+      () => {
+
+        show(
+          "resultScreen"
+        );
+
+      }
+    );
+
+}
+
+
+/*
+ * Check whether the business review URL is configured.
+ */
+function isGoogleReviewConfigured() {
+
+  return (
+    typeof GOOGLE_REVIEW_URL === "string" &&
+    GOOGLE_REVIEW_URL.trim() !== "" &&
+    !GOOGLE_REVIEW_URL.includes(
+      "PASTE_YOUR_GOOGLE_REVIEW_LINK_HERE"
+    )
+  );
+
+}
+
+
+/* ============================================================================
+ * 22.5 GOOGLE REVIEW GATE
+ * ========================================================================== */
+
+function openGoogleReviewGate() {
+
+  ensureGoogleReviewScreen();
+
+
+  const studentName =
+    state.exam?.studentName ||
+    $("resultStudent")?.textContent ||
+    "CANDIDATE";
+
+
+  if ($("googleReviewStudent")) {
+
+    $("googleReviewStudent")
+      .textContent =
+        studentName;
+
+  }
+
+
+  /*
+   * Every completed exam gets a fresh confirmation gate.
+   */
+  if ($("googleReviewConfirmed")) {
+
+    $("googleReviewConfirmed")
+      .checked =
+        false;
+
+  }
+
+
+  if ($("continueToDetailedReviewBtn")) {
+
+    $("continueToDetailedReviewBtn")
+      .disabled =
+        true;
+
+  }
+
+
+  if ($("googleReviewError")) {
+
+    $("googleReviewError")
+      .textContent =
+        "";
+
+    $("googleReviewError")
+      .classList
+      .add(
+        "hidden"
+      );
+
+  }
+
+
+  show(
+    "googleReviewScreen"
+  );
+
+
+  window.scrollTo(
+    {
+      top: 0,
+      behavior: "smooth"
+    }
+  );
+
+}
+
+
+/* ============================================================================
+ * 22.6 DETAILED REVIEW LOADER
+ * ========================================================================== */
+
+async function openDetailedReview() {
+
+  if (
+    !state.examID
+  ) {
+
+    toast(
+      "No completed examination is available."
+    );
+
+
+    return;
+
+  }
+
+
+  try {
+
+    loading(
+      true,
+      "BUILDING DETAILED REVIEW…"
+    );
+
+
+    const review =
+      await gas(
+        "getDetailedExamReview",
+        [
+          state.examID
+        ],
+        {
+          maxAttempts: 2,
+          timeoutMilliseconds: 35000
+        }
+      );
+
+
+    state.review =
+      review;
+
+
+    renderReview(
+      review
+    );
+
+
+    loading(false);
+
+
+    show(
+      "reviewScreen"
+    );
+
+
+    window.scrollTo(
+      {
+        top: 0,
+        behavior: "smooth"
+      }
+    );
+
+  } catch (err) {
+
+    loading(false);
+
+
+    console.error(
+      "Detailed review failed:",
+      err
+    );
+
+
+    const reviewError =
+      $("googleReviewError");
+
+
+    if (reviewError) {
+
+      reviewError.textContent =
+        err.message ||
+        "Unable to load detailed review.";
+
+      reviewError.classList.remove(
+        "hidden"
+      );
+
+    }
+
+
+    toast(
+      err.message ||
+      "Unable to load detailed review."
+    );
+
+  }
+
+}
+
+
+/* ============================================================================
+ * 22.7 DETAILED REVIEW RENDERER — STUDENT NAME INCLUDED
+ * ========================================================================== */
+
+function renderReview(
+  data
+) {
+
+  const rows =
+    Array.isArray(data)
+      ? data
+      : (
+          data?.questions ||
+          data?.review ||
+          data?.records ||
+          []
+        );
+
+
+  const reviewScreen =
+    $("reviewScreen");
+
+
+  const reviewList =
+    $("reviewList");
+
+
+  if (
+    !reviewScreen ||
+    !reviewList
+  ) {
+
+    return;
+
+  }
+
+
+  /*
+   * ------------------------------------------------------------
+   * Add candidate name to the review header once.
+   * ------------------------------------------------------------
+   */
+  const reviewHeader =
+    reviewScreen.querySelector(
+      ".review-header"
+    );
+
+
+  if (
+    reviewHeader &&
+    !$("reviewStudent")
+  ) {
+
+    const candidate =
+      document.createElement(
+        "div"
+      );
+
+
+    candidate.id =
+      "reviewStudent";
+
+
+    candidate.className =
+      "review-student-name";
+
+
+    const headerContent =
+      reviewHeader.firstElementChild;
+
+
+    if (headerContent) {
+
+      headerContent.appendChild(
+        candidate
+      );
+
+    } else {
+
+      reviewHeader.prepend(
+        candidate
+      );
+
+    }
+
+  }
+
+
+  if ($("reviewStudent")) {
+
+    $("reviewStudent")
+      .textContent =
+        state.exam?.studentName ||
+        $("resultStudent")?.textContent ||
+        "CANDIDATE";
+
+  }
+
+
+  /*
+   * ------------------------------------------------------------
+   * Empty review.
+   * ------------------------------------------------------------
+   */
+  if (
+    rows.length === 0
+  ) {
+
+    reviewList.innerHTML =
+      `
+        <div class="panel review-item">
+          No detailed review records were returned.
+        </div>
+      `;
+
+
+    return;
+
+  }
+
+
+  /*
+   * ------------------------------------------------------------
+   * Question-wise review.
+   * ------------------------------------------------------------
+   */
+  reviewList.innerHTML =
+    rows
+      .map(
+        (record, index) => {
+
+          const number =
+            Number(
+              record.questionNumber ??
+              index + 1
+            );
+
+
+          const question =
+            record.question ??
+            record.Question ??
+            "";
+
+
+          const studentAnswer =
+            String(
+              record.studentAnswer ??
+              record.StudentAnswer ??
+              ""
+            )
+              .trim()
+              .toUpperCase();
+
+
+          const correctAnswer =
+            String(
+              record.correctAnswer ??
+              record.CorrectAnswer ??
+              ""
+            )
+              .trim()
+              .toUpperCase();
+
+
+          const result =
+            String(
+              record.result ??
+              record.Result ??
+              ""
+            )
+              .trim()
+              .toUpperCase();
+
+
+          const explanation =
+            record.explanation ??
+            record.Explanation ??
+            "";
+
+
+          const examTip =
+            record.examTip ??
+            record.ExamTip ??
+            "";
+
+
+          const options = [
+
+            [
+              "A",
+              record.optionA ??
+              record.OptionA ??
+              ""
+            ],
+
+            [
+              "B",
+              record.optionB ??
+              record.OptionB ??
+              ""
+            ],
+
+            [
+              "C",
+              record.optionC ??
+              record.OptionC ??
+              ""
+            ],
+
+            [
+              "D",
+              record.optionD ??
+              record.OptionD ??
+              ""
+            ]
+
+          ];
+
+
+          return `
+            <article class="review-item panel">
+
+              <div class="review-meta">
+
+                <span>
+                  QUESTION ${String(
+                    number
+                  ).padStart(2, "0")}
+                </span>
+
+                <span class="review-badge">
+                  ${escapeHtml(
+                    result ||
+                    "REVIEW"
+                  )}
+                </span>
+
+              </div>
+
+
+              <div class="review-q">
+                ${escapeHtml(
+                  question
+                )}
+              </div>
+
+
+              <div class="review-options">
+
+                ${options
+                  .map(
+                    ([key, value]) => `
+
+                      <div class="review-option ${
+                        key === correctAnswer
+                          ? "correct"
+                          : ""
+                      } ${
+                        key === studentAnswer &&
+                        studentAnswer !== correctAnswer
+                          ? "wrong"
+                          : ""
+                      }">
+
+                        <b>${key}</b>
+
+                        ${escapeHtml(
+                          value
+                        )}
+
+                      </div>
+
+                    `
+                  )
+                  .join("")}
+
+              </div>
+
+
+              ${
+                explanation
+                  ? `
+                    <div class="review-explanation">
+
+                      <strong>
+                        EXPLANATION
+                      </strong>
+
+                      <br>
+
+                      ${escapeHtml(
+                        explanation
+                      )}
+
+                    </div>
+                  `
+                  : ""
+              }
+
+
+              ${
+                examTip
+                  ? `
+                    <div class="review-explanation">
+
+                      <strong>
+                        EXAM TIP
+                      </strong>
+
+                      <br>
+
+                      ${escapeHtml(
+                        examTip
+                      )}
+
+                    </div>
+                  `
+                  : ""
+              }
+
+            </article>
+          `;
+
+        }
+      )
+      .join("");
+
+}
+
+
+/* ============================================================================
+ * 22.8 REPLACE THE ORIGINAL REVIEW-BUTTON ACTION
+ * ========================================================================== */
+
+/*
+ * The original app.js already has a reviewBtn click handler.
+ *
+ * This capture-phase handler stops the old handler from bypassing the Google
+ * review gate. It is intentionally installed after all original code.
+ */
+if ($("reviewBtn")) {
+
+  $("reviewBtn")
+    .addEventListener(
+      "click",
+      event => {
+
+        event.preventDefault();
+
+        event.stopImmediatePropagation();
+
+        openGoogleReviewGate();
+
+      },
+      true
+    );
+
+}
+
+
+/* ============================================================================
+ * 22.9 STARTUP DIAGNOSTIC
+ * ========================================================================== */
+
+console.info(
+  "NOOTECH POST-SUBMISSION FLOW:",
+  "RESULT → GOOGLE REVIEW → DETAILED REVIEW"
+);
+
+console.info(
+  "NOOTECH GOOGLE REVIEW CONFIGURED:",
+  isGoogleReviewConfigured()
+);
+
+
+
+/* ============================================================================
+ * 23. EXAM SECURITY / BROWSER FOCUS MONITOR
+ * ============================================================================
+ *
+ * Browser-level exam security:
+ * - Fullscreen request at exam start
+ * - Tab/page visibility detection
+ * - Window/application focus-loss detection
+ * - Fullscreen-exit detection
+ * - Common browser shortcut blocking
+ * - Right-click blocking
+ * - Violation counter and automatic submission
+ * - Optional Apps Script security audit logging
+ *
+ * A normal web page cannot physically lock Windows or guarantee prevention of
+ * Alt+Tab, Task Manager, another application, another monitor, etc.
+ * True OS-level lockdown requires a managed kiosk browser/device.
+ * ========================================================================== */
+
+const EXAM_SECURITY_CONFIG = {
+  enabled: true,
+  maxViolations: 3,
+  startupGraceMilliseconds: 2500,
+  violationDebounceMilliseconds: 1500,
+  requestFullscreen: true,
+  blockBrowserShortcuts: true,
+  backendLogging: true,
+  backendLogFunction: "logExamSecurityViolation"
+};
+
+const examSecurity = {
+  active: false,
+  violations: 0,
+  lastViolationAt: 0,
+  startupAt: 0,
+  fullscreenRequested: false,
+  handlersInstalled: false,
+  autoSubmitting: false,
+  boundVisibility: null,
+  boundBlur: null,
+  boundFocus: null,
+  boundFullscreen: null,
+  boundKeydown: null,
+  boundContextMenu: null,
+  boundBeforeUnload: null
+};
+
+function isExamSecurityActive() {
+  return (
+    EXAM_SECURITY_CONFIG.enabled === true &&
+    examSecurity.active === true &&
+    !!state.examID &&
+    state.submitted === false &&
+    state.submitting === false
+  );
+}
+
+function ensureExamSecurityUI() {
+  if ($("nootechSecurityStatus")) return;
+
+  const examScreen = $("examScreen");
+  if (!examScreen) return;
+
+  const status = document.createElement("div");
+  status.id = "nootechSecurityStatus";
+
+  status.innerHTML = `
+    <span class="nootech-security-dot"></span>
+    <span class="nootech-security-text">EXAM SECURITY ACTIVE</span>
+    <span class="nootech-security-count">VIOLATIONS: 0/${EXAM_SECURITY_CONFIG.maxViolations}</span>
+  `;
+
+  status.style.cssText = `
+    position:fixed;
+    right:16px;
+    bottom:16px;
+    z-index:9998;
+    display:flex;
+    align-items:center;
+    gap:8px;
+    padding:9px 12px;
+    border:1px solid rgba(255,255,255,.18);
+    border-radius:10px;
+    background:rgba(8,12,20,.92);
+    color:#fff;
+    font:700 11px/1.2 Arial,sans-serif;
+    letter-spacing:.5px;
+    box-shadow:0 8px 24px rgba(0,0,0,.28);
+    pointer-events:none;
+    backdrop-filter:blur(8px);
+  `;
+
+  const dot = status.querySelector(".nootech-security-dot");
+  if (dot) {
+    dot.style.cssText = `
+      width:8px;height:8px;border-radius:50%;
+      background:#22c55e;
+      box-shadow:0 0 10px rgba(34,197,94,.8);
+      flex:0 0 auto;
+    `;
+  }
+
+  examScreen.appendChild(status);
+}
+
+function updateExamSecurityUI(message = "") {
+  const status = $("nootechSecurityStatus");
+  if (!status) return;
+
+  const countNode = status.querySelector(".nootech-security-count");
+  const textNode = status.querySelector(".nootech-security-text");
+  const dot = status.querySelector(".nootech-security-dot");
+
+  if (countNode) {
+    countNode.textContent =
+      `VIOLATIONS: ${examSecurity.violations}/${EXAM_SECURITY_CONFIG.maxViolations}`;
+  }
+
+  if (message && textNode) {
+    textNode.textContent = message;
+  }
+
+  if (dot) {
+    if (examSecurity.violations >= EXAM_SECURITY_CONFIG.maxViolations) {
+      dot.style.background = "#ef4444";
+      dot.style.boxShadow = "0 0 10px rgba(239,68,68,.9)";
+    } else if (examSecurity.violations > 0) {
+      dot.style.background = "#f59e0b";
+      dot.style.boxShadow = "0 0 10px rgba(245,158,11,.9)";
+    } else {
+      dot.style.background = "#22c55e";
+      dot.style.boxShadow = "0 0 10px rgba(34,197,94,.8)";
+    }
+  }
+}
+
+function showExamSecurityWarning(message) {
+  try {
+    toast(message);
+  } catch (err) {
+    console.warn("Security warning:", message);
+  }
+}
+
+async function requestExamFullscreen() {
+  if (
+    !EXAM_SECURITY_CONFIG.requestFullscreen ||
+    !document.documentElement ||
+    typeof document.documentElement.requestFullscreen !== "function"
+  ) {
+    return false;
+  }
+
+  if (document.fullscreenElement) {
+    examSecurity.fullscreenRequested = true;
+    return true;
+  }
+
+  try {
+    await document.documentElement.requestFullscreen();
+    examSecurity.fullscreenRequested = true;
+    return true;
+  } catch (err) {
+    console.warn("NOOTECH fullscreen request was denied:", err);
+    return false;
+  }
+}
+
+function securityEventDescription(type) {
+  const descriptions = {
+    TAB_SWITCH: "Browser tab or page visibility changed.",
+    WINDOW_BLUR: "Exam browser window lost focus.",
+    FULLSCREEN_EXIT: "Browser fullscreen mode was exited.",
+    SHORTCUT: "A restricted browser shortcut was pressed.",
+    CONTEXT_MENU: "Context menu was requested during the exam."
+  };
+
+  return descriptions[type] || "Exam security policy was triggered.";
+}
+
+async function logExamSecurityEvent(type, extra = {}) {
+  const payload = {
+    examID: state.examID || "",
+    studentName:
+      state.exam?.studentName ||
+      $("studentName")?.value?.trim() ||
+      "",
+    violationNumber: examSecurity.violations,
+    eventType: type,
+    eventDescription: securityEventDescription(type),
+    eventTime: new Date().toISOString(),
+    visibilityState: document.visibilityState,
+    fullscreen: !!document.fullscreenElement,
+    userAgent: navigator.userAgent,
+    ...extra
+  };
+
+  console.warn("NOOTECH EXAM SECURITY EVENT:", payload);
+
+  if (!EXAM_SECURITY_CONFIG.backendLogging || !state.examID) return;
+
+  try {
+    await gas(
+      EXAM_SECURITY_CONFIG.backendLogFunction,
+      [payload],
+      { maxAttempts: 1, timeoutMilliseconds: 10000 }
+    );
+  } catch (err) {
+    console.warn("NOOTECH security event could not be logged:", err);
+  }
+}
+
+function registerExamSecurityViolation(type, extra = {}) {
+  if (!isExamSecurityActive()) return;
+
+  const now = Date.now();
+
+  if (
+    now - examSecurity.startupAt <
+    EXAM_SECURITY_CONFIG.startupGraceMilliseconds
+  ) {
+    return;
+  }
+
+  if (
+    now - examSecurity.lastViolationAt <
+    EXAM_SECURITY_CONFIG.violationDebounceMilliseconds
+  ) {
+    return;
+  }
+
+  examSecurity.lastViolationAt = now;
+  examSecurity.violations += 1;
+
+  updateExamSecurityUI("SECURITY WARNING");
+  void logExamSecurityEvent(type, extra);
+
+  const count = examSecurity.violations;
+  const maximum = EXAM_SECURITY_CONFIG.maxViolations;
+
+  if (count >= maximum) {
+    if (examSecurity.autoSubmitting) return;
+
+    examSecurity.autoSubmitting = true;
+    updateExamSecurityUI("EXAM TERMINATING");
+
+    showExamSecurityWarning(
+      "SECURITY VIOLATION LIMIT REACHED — YOUR EXAM IS BEING SUBMITTED."
+    );
+
+    window.setTimeout(() => {
+      if (!state.submitted && !state.submitting && state.examID) {
+        void doSubmit(true);
+      }
+    }, 700);
+
+    return;
+  }
+
+  if (count === maximum - 1) {
+    showExamSecurityWarning(
+      `FINAL SECURITY WARNING — LEAVE THE EXAM WINDOW AGAIN AND THE EXAM WILL BE AUTO-SUBMITTED. (${count}/${maximum})`
+    );
+  } else {
+    showExamSecurityWarning(
+      `SECURITY WARNING — PLEASE REMAIN ON THE EXAM SCREEN. (${count}/${maximum})`
+    );
+  }
+}
+
+function handleExamVisibilityChange() {
+  if (!isExamSecurityActive()) return;
+
+  if (document.visibilityState !== "visible") {
+    registerExamSecurityViolation("TAB_SWITCH");
+  }
+}
+
+function handleExamWindowBlur() {
+  if (!isExamSecurityActive()) return;
+  registerExamSecurityViolation("WINDOW_BLUR");
+}
+
+function handleExamWindowFocus() {
+  if (!isExamSecurityActive()) return;
+
+  updateExamSecurityUI(
+    examSecurity.violations > 0
+      ? "SECURITY MONITORING ACTIVE"
+      : "EXAM SECURITY ACTIVE"
+  );
+}
+
+function handleExamFullscreenChange() {
+  if (!isExamSecurityActive()) return;
+  if (!examSecurity.fullscreenRequested) return;
+
+  if (!document.fullscreenElement) {
+    registerExamSecurityViolation("FULLSCREEN_EXIT");
+  }
+}
+
+function handleExamRestrictedKeyboard(event) {
+  if (
+    !isExamSecurityActive() ||
+    !EXAM_SECURITY_CONFIG.blockBrowserShortcuts
+  ) {
+    return;
+  }
+
+  const key = String(event.key || "").toLowerCase();
+  const ctrl = event.ctrlKey || event.metaKey;
+  const alt = event.altKey;
+  const shift = event.shiftKey;
+
+  let restricted = false;
+
+  if (ctrl && (key === "t" || key === "n" || key === "w")) {
+    restricted = true;
+  }
+
+  if (ctrl && shift && key === "t") {
+    restricted = true;
+  }
+
+  if (
+    key === "f12" ||
+    (ctrl && shift && (key === "i" || key === "j" || key === "c")) ||
+    (ctrl && key === "u")
+  ) {
+    restricted = true;
+  }
+
+  if (alt && (key === "arrowleft" || key === "arrowright")) {
+    restricted = true;
+  }
+
+  if (key === "f5" || (ctrl && key === "r")) {
+    restricted = true;
+  }
+
+  if (!restricted) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+
+  registerExamSecurityViolation("SHORTCUT", {
+    key: event.key,
+    ctrl: !!event.ctrlKey,
+    alt: !!event.altKey,
+    shift: !!event.shiftKey
+  });
+}
+
+function handleExamContextMenu(event) {
+  if (!isExamSecurityActive()) return;
+
+  event.preventDefault();
+  registerExamSecurityViolation("CONTEXT_MENU");
+}
+
+function handleExamBeforeUnload(event) {
+  if (!isExamSecurityActive()) return;
+
+  event.preventDefault();
+  event.returnValue = "";
+}
+
+function installExamSecurityListeners() {
+  if (examSecurity.handlersInstalled) return;
+
+  examSecurity.boundVisibility = handleExamVisibilityChange;
+  examSecurity.boundBlur = handleExamWindowBlur;
+  examSecurity.boundFocus = handleExamWindowFocus;
+  examSecurity.boundFullscreen = handleExamFullscreenChange;
+  examSecurity.boundKeydown = handleExamRestrictedKeyboard;
+  examSecurity.boundContextMenu = handleExamContextMenu;
+  examSecurity.boundBeforeUnload = handleExamBeforeUnload;
+
+  document.addEventListener(
+    "visibilitychange",
+    examSecurity.boundVisibility,
+    true
+  );
+
+  window.addEventListener("blur", examSecurity.boundBlur, true);
+  window.addEventListener("focus", examSecurity.boundFocus, true);
+
+  document.addEventListener(
+    "fullscreenchange",
+    examSecurity.boundFullscreen,
+    true
+  );
+
+  document.addEventListener(
+    "keydown",
+    examSecurity.boundKeydown,
+    true
+  );
+
+  document.addEventListener(
+    "contextmenu",
+    examSecurity.boundContextMenu,
+    true
+  );
+
+  window.addEventListener(
+    "beforeunload",
+    examSecurity.boundBeforeUnload,
+    true
+  );
+
+  examSecurity.handlersInstalled = true;
+}
+
+function uninstallExamSecurityListeners() {
+  if (!examSecurity.handlersInstalled) return;
+
+  document.removeEventListener(
+    "visibilitychange",
+    examSecurity.boundVisibility,
+    true
+  );
+
+  window.removeEventListener("blur", examSecurity.boundBlur, true);
+  window.removeEventListener("focus", examSecurity.boundFocus, true);
+
+  document.removeEventListener(
+    "fullscreenchange",
+    examSecurity.boundFullscreen,
+    true
+  );
+
+  document.removeEventListener(
+    "keydown",
+    examSecurity.boundKeydown,
+    true
+  );
+
+  document.removeEventListener(
+    "contextmenu",
+    examSecurity.boundContextMenu,
+    true
+  );
+
+  window.removeEventListener(
+    "beforeunload",
+    examSecurity.boundBeforeUnload,
+    true
+  );
+
+  examSecurity.handlersInstalled = false;
+}
+
+function activateExamSecurity() {
+  if (!EXAM_SECURITY_CONFIG.enabled || !state.examID) return;
+
+  examSecurity.active = true;
+  examSecurity.violations = 0;
+  examSecurity.lastViolationAt = 0;
+  examSecurity.startupAt = Date.now();
+  examSecurity.fullscreenRequested = false;
+  examSecurity.autoSubmitting = false;
+
+  ensureExamSecurityUI();
+  updateExamSecurityUI("EXAM SECURITY ACTIVE");
+  installExamSecurityListeners();
+
+  if (EXAM_SECURITY_CONFIG.requestFullscreen) {
+    void requestExamFullscreen();
+  }
+}
+
+function deactivateExamSecurity() {
+  examSecurity.active = false;
+  uninstallExamSecurityListeners();
+  examSecurity.autoSubmitting = false;
+
+  const status = $("nootechSecurityStatus");
+  if (status) status.remove();
+
+  if (
+    document.fullscreenElement &&
+    typeof document.exitFullscreen === "function"
+  ) {
+    document.exitFullscreen().catch(() => {});
+  }
+}
+
+console.info(
+  "NOOTECH EXAM SECURITY: BROWSER FOCUS / TAB / FULLSCREEN MONITOR READY"
 );
