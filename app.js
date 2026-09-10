@@ -5785,8 +5785,12 @@ function handleExamVisibilityChange() {
 }
 
 function handleExamWindowBlur() {
+  /*
+   * Do NOT count blur as a violation. Clicking normal exam controls can
+   * legitimately cause focus changes in the browser.
+   */
   if (!isExamSecurityActive()) return;
-  registerExamSecurityViolation("WINDOW_BLUR");
+  updateExamSecurityUI("SECURITY MONITORING ACTIVE");
 }
 
 function handleExamWindowFocus() {
@@ -5852,19 +5856,15 @@ function handleExamRestrictedKeyboard(event) {
   event.preventDefault();
   event.stopPropagation();
 
-  registerExamSecurityViolation("SHORTCUT", {
-    key: event.key,
-    ctrl: !!event.ctrlKey,
-    alt: !!event.altKey,
-    shift: !!event.shiftKey
-  });
+  /* Block the shortcut without counting it as a violation. */
+  updateExamSecurityUI("SECURITY MONITORING ACTIVE");
 }
 
 function handleExamContextMenu(event) {
   if (!isExamSecurityActive()) return;
 
+  /* Disable context menu, but never count it as a security violation. */
   event.preventDefault();
-  registerExamSecurityViolation("CONTEXT_MENU");
 }
 
 function handleExamBeforeUnload(event) {
