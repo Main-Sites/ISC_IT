@@ -3022,7 +3022,9 @@ async function doSubmit(
 
     /*
      * submitExam() should already return the complete result.
-     * Therefore showResult() does not normally make another request.
+     * Therefore cleanupExamSecurity();
+
+    showResult() does not normally make another request.
      */
     showResult(
       result
@@ -3126,6 +3128,228 @@ function normalizeResult(
  * The percentage is read from the authoritative backend result.
  * If it is unavailable, it is safely calculated from obtained/total marks.
  */
+
+
+/* ============================================================================
+ * EXAM SECURITY MONITORING
+ * ============================================================================
+ * VIOLATIONS:
+ *   1. Leaving the exam page/tab (document visibility change)
+ *   2. Exiting fullscreen during the exam
+ *
+ * NEVER VIOLATIONS:
+ *   - Choosing/selecting an answer
+ *   - Window blur/focus
+ *   - Right-click
+ *   - Restricted keyboard shortcuts
+ *
+ * Window blur is deliberately ignored because normal exam interaction can
+ * trigger blur/focus events and must never be counted as a violation.
+ * ========================================================================== */
+
+let examSecurityActive = false;
+let examSecurityViolationCount = 0;
+let examSecurityFullscreenRequested = false;
+
+function updateSecurityStatusUI() {
+  const el =
+    document.getElementById("securityStatus") ||
+    document.querySelector("[data-security-status]");
+
+  if (el) {
+    el.textContent =
+      examSecurityViolationCount > 0
+        ? `Security violations: ${examSecurityViolationCount}`
+        : "Exam security active";
+  }
+}
+
+async function registerExamSecurityViolation(type, details) {
+  if (!examSecurityActive) return;
+
+  examSecurityViolationCount++;
+
+  updateSecurityStatusUI();
+
+  console.warn(
+    "EXAM SECURITY VIOLATION:",
+    type,
+    details || ""
+  );
+
+  // Use the existing backend security logger when available.
+  try {
+    if (typeof gas === "function" && state.examID) {
+      await gas(
+        "logExamSecurityViolation",
+        [{
+          examID: state.examID,
+          violationType: String(type || "UNKNOWN"),
+          details: String(details || ""),
+          timestamp: new Date().toISOString()
+        }],
+        {
+          maxAttempts: 1,
+          timeoutMilliseconds: 10000
+        }
+      );
+    }
+  } catch (err) {
+    // Security logging failure must never stop the examination.
+    console.warn(
+      "Security violation could not be logged:",
+      err
+    );
+  }
+}
+
+function handleExamVisibilityChange() {
+  if (
+    examSecurityActive &&
+    document.visibilityState === "hidden"
+  ) {
+    registerExamSecurityViolation(
+      "TAB_OR_PAGE_SWITCH",
+      "Exam page became hidden."
+    );
+  }
+}
+
+function handleExamFullscreenChange() {
+  if (
+    examSecurityActive &&
+    !document.fullscreenElement
+  ) {
+    registerExamSecurityViolation(
+      "FULLSCREEN_EXIT",
+      "Candidate exited fullscreen mode."
+    );
+  }
+}
+
+function handleExamWindowBlur() {
+  // IMPORTANT:
+  // Blur is NOT a security violation.
+  // Answer selection and normal browser interaction can cause blur/focus.
+  updateSecurityStatusUI();
+}
+
+async function enterExamFullscreen() {
+  try {
+    if (
+      document.documentElement.requestFullscreen &&
+      !document.fullscreenElement
+    ) {
+      await document.documentElement.requestFullscreen();
+      examSecurityFullscreenRequested = true;
+    }
+  } catch (err) {
+    console.warn(
+      "Fullscreen could not be entered:",
+      err
+    );
+  }
+}
+
+function exitExamFullscreen() {
+  try {
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    }
+  } catch (err) {
+    console.warn(
+      "Fullscreen exit failed:",
+      err
+    );
+  }
+}
+
+function setupExamSecurity() {
+  if (examSecurityActive) return;
+
+  examSecurityActive = true;
+  examSecurityViolationCount = 0;
+
+  document.addEventListener(
+    "visibilitychange",
+    handleExamVisibilityChange
+  );
+
+  document.addEventListener(
+    "fullscreenchange",
+    handleExamFullscreenChange
+  );
+
+  window.addEventListener(
+    "blur",
+    handleExamWindowBlur
+  );
+
+  // These are prevention-only. They are NOT violations.
+  document.addEventListener(
+    "contextmenu",
+    function (event) {
+      if (examSecurityActive) {
+        event.preventDefault();
+      }
+    }
+  );
+
+  document.addEventListener(
+    "keydown",
+    function (event) {
+      if (!examSecurityActive) return;
+
+      const blocked =
+        event.key === "F12" ||
+        (event.ctrlKey && event.shiftKey &&
+          ["I", "J", "C"].includes(
+            String(event.key).toUpperCase()
+          )) ||
+        (event.ctrlKey &&
+          ["U"].includes(
+            String(event.key).toUpperCase()
+          ));
+
+      if (blocked) {
+        event.preventDefault();
+        // Deliberately NOT a violation.
+      }
+    }
+  );
+
+  updateSecurityStatusUI();
+
+  // Request fullscreen after the exam screen is active.
+  setTimeout(
+    () => enterExamFullscreen(),
+    250
+  );
+}
+
+function cleanupExamSecurity() {
+  if (!examSecurityActive) return;
+
+  examSecurityActive = false;
+
+  document.removeEventListener(
+    "visibilitychange",
+    handleExamVisibilityChange
+  );
+
+  document.removeEventListener(
+    "fullscreenchange",
+    handleExamFullscreenChange
+  );
+
+  window.removeEventListener(
+    "blur",
+    handleExamWindowBlur
+  );
+
+  exitExamFullscreen();
+}
+
 
 /* ============================================================================
  * 16. FINAL RESULT
