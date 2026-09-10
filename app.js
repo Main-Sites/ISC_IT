@@ -3,45 +3,47 @@
  * NOOTECH ONLINE EXAM - GITHUB PAGES FRONTEND WITH SECURITY VIOLENCE
  * ============================================================================
  *
- * PRODUCTION FRONTEND
- * ----------------------------------------------------------------------------
- * This is the complete browser-side controller for the NOOTECH Online Exam UI.
+ * FINAL CONSOLIDATED VERSION
  *
- * BACKEND FUNCTIONS USED
+ * PRESERVED FEATURES
  * ----------------------------------------------------------------------------
- * 1. getExamHierarchy()
- * 2. createExamSession(studentName, stream, year, unit, chapter, questionCount)
- * 3. getStudentQuestionForDisplay(examID, questionNumber)
- * 4. saveStudentAnswer(examID, questionID, studentAnswer)
- * 5. submitExam(examID)
- * 6. getFinalExamResult(examID)          [fallback only]
- * 7. getDetailedExamReview(examID)
+ * ✓ Google Apps Script API
+ * ✓ Exam hierarchy / dependent dropdowns
+ * ✓ Exam session creation
+ * ✓ Question caching
+ * ✓ Answer saving
+ * ✓ Question navigator
+ * ✓ Timer
+ * ✓ Final score calculation/display
+ * ✓ Percentage calculation/display
+ * ✓ Correct / Wrong / Unattempted statistics
+ * ✓ Google Review gate
+ * ✓ Detailed question review
+ * ✓ Candidate name in review
+ * ✓ Browser security monitoring
+ * ✓ Tab/page-switch violation
+ * ✓ Fullscreen-exit violation
+ * ✓ Automatic submission after violation limit
+ * ✓ Security backend logging
  *
- * IMPORTANT ARCHITECTURE
+ * SECURITY RULE
  * ----------------------------------------------------------------------------
- * - No spreadsheet credentials are stored here.
- * - CorrectAnswer / Explanation / ExamTip are never requested during the
- *   active examination.
- * - Exam creation response is reused instead of immediately calling
- *   getStudentExam().
- * - The expensive server-side navigator is NOT requested during startup when
- *   createExamSession() already returns the selected question list.
- * - Questions are cached in browser memory.
- * - Answer state is updated locally immediately and persisted asynchronously.
- * - Only one request is made when an answer is selected.
- * - Final scoring remains entirely server-side.
+ * Answer selection is NEVER a security violation.
+ * Window blur is NEVER a security violation.
+ * Right-click is NEVER a security violation.
+ * Restricted shortcuts are blocked but NEVER counted as violations.
  *
- * UI REQUIREMENT
+ * ONLY:
+ *   TAB_SWITCH
+ *   FULLSCREEN_EXIT
+ *
+ * are counted as security violations.
+ *
+ * SCORE RULE
  * ----------------------------------------------------------------------------
- * This file is designed for the existing NOOTECH gaming-theme index.html.
- * It expects the existing element IDs such as:
- * startForm, studentName, stream, year, unit, chapter, questionCount,
- * examScreen, navigatorGrid, questionText, options, prevBtn, nextBtn,
- * submitTopBtn, submitModal, confirmSubmit, cancelSubmit, resultScreen,
- * scorePercent, scoreValue, correctValue, wrongValue, unattemptedValue,
- * reviewBtn, reviewList, reviewBack, restartBtn, loading, loadingText,
- * toast, startError, questionError, resultError, liveExamId, playerLabel,
- * timer, navCount and saveStatus.
+ * Final score is obtained from the authoritative completed backend result.
+ * If necessary, getFinalExamResult() is called again after submission.
+ *
  * ============================================================================
  */
 
@@ -50,82 +52,57 @@
  * 1. GOOGLE APPS SCRIPT WEB APP CONFIGURATION
  * ========================================================================== */
 
-/*
- * Production Google Apps Script Web App URL.
- *
- * IMPORTANT:
- * - Use the deployed /exec URL.
- * - Do not use /dev.
- * - Do not remove /exec.
- */
 const GAS_WEB_APP_URL =
   "https://script.google.com/macros/s/AKfycbyB2peSdXKhgFg9JdmbPV-dh1GKIaqlQL58aeS-sXM_TJMLr64XUqFUsxRQK75scqhsGg/exec";
 
 
 /* ============================================================================
- * 2. FRONTEND STATE
+ * 2. GOOGLE BUSINESS REVIEW CONFIGURATION
+ * ========================================================================== */
+
+const GOOGLE_REVIEW_URL =
+  "PASTE_YOUR_GOOGLE_REVIEW_LINK_HERE";
+
+
+/* ============================================================================
+ * 3. GLOBAL EXAM STATE
  * ========================================================================== */
 
 const state = {
 
-  // Current examination ID.
   examID: null,
 
-  // Metadata returned by createExamSession().
   exam: null,
 
-  // Currently displayed question number.
   current: 1,
 
-  // Local answer map:
-  // { QuestionID: "A" }
   answers: {},
 
-  // Local navigator map:
-  // { 1: { questionNumber, questionID, answered, studentAnswer } }
   navigator: {},
 
-  // Browser memory cache:
-  // { 1: questionObject, 2: questionObject, ... }
   questionCache: {},
 
-  // Timer interval handle.
   timer: null,
 
-  // Absolute end time in milliseconds.
   endTime: null,
 
-  // Prevent duplicate submission.
   submitted: false,
 
-  // Prevent concurrent submission.
   submitting: false,
 
-  // Cached detailed review.
   review: null,
 
-  // Used to ignore stale question responses.
   questionRequestId: 0,
 
-  // Used to prevent multiple simultaneous question loads.
   navigationBusy: false
+
 };
 
 
 /* ============================================================================
- * 3. EXAM HIERARCHY STATE
+ * 4. EXAM HIERARCHY STATE
  * ========================================================================== */
 
-/*
- * Backend returns:
- *
- * streams
- * years
- * units
- * chapters
- *
- * The frontend keeps the same backend data structure internally.
- */
 const hierarchy = {
 
   streams: [],
@@ -135,23 +112,18 @@ const hierarchy = {
   unitsByStreamYear: {},
 
   chaptersByStreamYearUnit: {}
+
 };
 
 
 /* ============================================================================
- * 4. BASIC DOM HELPERS
+ * 5. DOM / UI HELPERS
  * ========================================================================== */
 
-/*
- * Short, safe DOM selector.
- */
 const $ = id =>
   document.getElementById(id);
 
 
-/*
- * Display one application screen.
- */
 function show(id) {
 
   document
@@ -176,9 +148,6 @@ function show(id) {
 }
 
 
-/*
- * Display or hide the global loading layer.
- */
 function loading(
   visible,
   message = "CONNECTING…"
@@ -206,9 +175,6 @@ function loading(
 }
 
 
-/*
- * Display an error message inside a specific element.
- */
 function error(
   elementId,
   message
@@ -235,9 +201,6 @@ function error(
 }
 
 
-/*
- * Small non-blocking notification.
- */
 function toast(message) {
 
   const element =
@@ -278,9 +241,6 @@ function toast(message) {
 }
 
 
-/*
- * Small asynchronous delay used by retry logic.
- */
 function sleep(milliseconds) {
 
   return new Promise(
@@ -297,9 +257,6 @@ function sleep(milliseconds) {
 }
 
 
-/*
- * Safely escape text before inserting it as HTML.
- */
 function escapeHtml(value) {
 
   const text =
@@ -325,16 +282,9 @@ function escapeHtml(value) {
 
 
 /* ============================================================================
- * 5. BACKEND CONFIGURATION VALIDATION
+ * 6. BACKEND CONFIGURATION
  * ========================================================================== */
 
-/*
- * Validate only the format of the configured URL.
- *
- * IMPORTANT:
- * The previous version incorrectly compared the URL against the actual
- * production URL. That made a valid URL appear invalid.
- */
 function assertConfig() {
 
   if (
@@ -394,12 +344,9 @@ function assertConfig() {
 
 
 /* ============================================================================
- * 6. BACKEND API TRANSPORT
+ * 7. BACKEND API TRANSPORT
  * ========================================================================== */
 
-/*
- * Build the GET request expected by the Apps Script doGet(e) router.
- */
 function buildApiUrl(
   functionName,
   args = []
@@ -433,13 +380,6 @@ function buildApiUrl(
 }
 
 
-/*
- * Determine whether a server status is worth retrying.
- *
- * 804 is not a standard HTTP status, but it has appeared in some gateway
- * paths. If the browser receives it, a short retry is safer than failing
- * immediately.
- */
 function shouldRetryStatus(status) {
 
   return (
@@ -452,9 +392,6 @@ function shouldRetryStatus(status) {
 }
 
 
-/*
- * Fetch with a hard timeout.
- */
 async function fetchWithTimeout(
   url,
   timeoutMilliseconds
@@ -494,14 +431,6 @@ async function fetchWithTimeout(
 }
 
 
-/*
- * Main backend communication function.
- *
- * Performance characteristics:
- * - Retries only transient failures.
- * - Does not retry ordinary validation errors.
- * - Unwraps { success:true, data:... } automatically.
- */
 async function gas(
   functionName,
   args = [],
@@ -583,6 +512,7 @@ async function gas(
             600 * attempt
           );
 
+
           continue;
 
         }
@@ -647,16 +577,6 @@ async function gas(
       }
 
 
-      /*
-       * Apps Script router normally returns:
-       *
-       * {
-       *   success: true,
-       *   data: ...
-       * }
-       *
-       * Accept both wrapped and direct responses.
-       */
       return (
         data &&
         Object.prototype.hasOwnProperty.call(
@@ -692,12 +612,6 @@ async function gas(
         attempt < maxAttempts &&
         transient
       ) {
-
-        console.warn(
-          `NOOTECH API temporary failure for ${functionName}:`,
-          err
-        );
-
 
         await sleep(
           600 * attempt
@@ -736,12 +650,9 @@ async function gas(
 
 
 /* ============================================================================
- * 7. EXAM HIERARCHY / DEPENDENT DROPDOWNS
+ * 8. HIERARCHY / DROPDOWNS
  * ========================================================================== */
 
-/*
- * Build the exact key used by getExamHierarchy().
- */
 function hierarchyKey(
   stream,
   year,
@@ -764,9 +675,6 @@ function hierarchyKey(
 }
 
 
-/*
- * Safely populate a SELECT element.
- */
 function setOptions(
   selectId,
   values,
@@ -844,11 +752,6 @@ function setOptions(
 }
 
 
-/*
- * Store hierarchy in sessionStorage.
- *
- * This is only a browser optimization. It does not replace the backend.
- */
 function saveHierarchyToSessionCache() {
 
   try {
@@ -872,9 +775,6 @@ function saveHierarchyToSessionCache() {
 }
 
 
-/*
- * Load hierarchy from browser session cache.
- */
 function loadHierarchyFromSessionCache() {
 
   try {
@@ -929,12 +829,6 @@ function loadHierarchyFromSessionCache() {
 
   } catch (err) {
 
-    console.warn(
-      "Unable to read hierarchy cache:",
-      err
-    );
-
-
     return false;
 
   }
@@ -942,9 +836,6 @@ function loadHierarchyFromSessionCache() {
 }
 
 
-/*
- * Render initial dropdown state.
- */
 function resetDependentDropdowns() {
 
   setOptions(
@@ -973,25 +864,11 @@ function resetDependentDropdowns() {
 }
 
 
-/*
- * Retrieve the complete exam catalog once.
- */
 async function loadExamHierarchy() {
 
-  /*
-   * FIRST: use browser session cache.
-   *
-   * This avoids an unnecessary Apps Script request when the student refreshes
-   * or returns to the start screen during the same browser session.
-   */
   if (
     loadHierarchyFromSessionCache()
   ) {
-
-    console.info(
-      "NOOTECH: Exam hierarchy loaded from session cache."
-    );
-
 
     setOptions(
       "stream",
@@ -1089,12 +966,6 @@ async function loadExamHierarchy() {
 
   } catch (err) {
 
-    console.error(
-      "getExamHierarchy failed:",
-      err
-    );
-
-
     error(
       "startError",
       "Unable to load Stream / Unit / Chapter list. " +
@@ -1113,9 +984,6 @@ async function loadExamHierarchy() {
 }
 
 
-/*
- * Connect the four dependent dropdowns.
- */
 function wireHierarchyDropdowns() {
 
   const streamSelect =
@@ -1134,19 +1002,11 @@ function wireHierarchyDropdowns() {
     !unitSelect
   ) {
 
-    console.warn(
-      "Hierarchy dropdown elements were not found."
-    );
-
-
     return;
 
   }
 
 
-  /*
-   * STREAM → YEAR
-   */
   streamSelect.addEventListener(
     "change",
     () => {
@@ -1182,9 +1042,6 @@ function wireHierarchyDropdowns() {
   );
 
 
-  /*
-   * YEAR → UNIT
-   */
   yearSelect.addEventListener(
     "change",
     () => {
@@ -1224,9 +1081,6 @@ function wireHierarchyDropdowns() {
   );
 
 
-  /*
-   * UNIT → CHAPTER
-   */
   unitSelect.addEventListener(
     "change",
     () => {
@@ -1265,15 +1119,9 @@ function wireHierarchyDropdowns() {
 
 
 /* ============================================================================
- * 8. EXAM INITIALIZATION
+ * 9. EXAM INITIALIZATION
  * ========================================================================== */
 
-/*
- * Convert the backend exam response to the local format.
- *
- * Kept as a separate function so future backend additions do not require
- * changing the rest of the frontend.
- */
 function normalizeExam(exam) {
 
   return (
@@ -1286,13 +1134,6 @@ function normalizeExam(exam) {
 }
 
 
-/*
- * Build the navigator directly from the question list returned by
- * createExamSession().
- *
- * This avoids the expensive getStudentQuestionNavigatorStatus() request during
- * exam startup.
- */
 function initializeNavigatorFromExam(
   exam
 ) {
@@ -1351,10 +1192,6 @@ function initializeNavigatorFromExam(
   );
 
 
-  /*
-   * If createExamSession() returns no question list, build a blank navigator
-   * from totalQuestions. This is a safe fallback.
-   */
   if (
     Object.keys(
       state.navigator
@@ -1408,9 +1245,6 @@ function initializeNavigatorFromExam(
 }
 
 
-/*
- * Start a new exam session.
- */
 async function initializeExam(
   event
 ) {
@@ -1516,20 +1350,6 @@ async function initializeExam(
     );
 
 
-    /*
-     * IMPORTANT PERFORMANCE DECISION:
-     *
-     * createExamSession() already creates:
-     * - ExamID
-     * - timer
-     * - question records
-     * - answer records
-     * - selected question list
-     *
-     * Therefore we reuse its response.
-     *
-     * We do NOT call getStudentExam() here.
-     */
     const result =
       await gas(
         "createExamSession",
@@ -1560,9 +1380,6 @@ async function initializeExam(
     }
 
 
-    /*
-     * Reset local examination state.
-     */
     state.examID =
       result.examID;
 
@@ -1601,17 +1418,11 @@ async function initializeExam(
       false;
 
 
-    /*
-     * Reuse question list from createExamSession().
-     */
     initializeNavigatorFromExam(
       result
     );
 
 
-    /*
-     * Update exam header.
-     */
     if ($("liveExamId")) {
 
       $("liveExamId")
@@ -1631,18 +1442,16 @@ async function initializeExam(
     }
 
 
-    /*
-     * Move to exam screen before loading the first question.
-     */
     show(
       "examScreen"
     );
 
+
     /*
-     * EXAM SECURITY
-     * Activate browser security immediately after the exam screen opens.
+     * SECURITY STARTS HERE.
      */
     activateExamSecurity();
+
 
     loading(
       true,
@@ -1650,11 +1459,6 @@ async function initializeExam(
     );
 
 
-    /*
-     * Only ONE question request is needed at startup.
-     *
-     * The navigator was already built from the createExamSession response.
-     */
     await loadQuestion(
       1,
       {
@@ -1663,9 +1467,6 @@ async function initializeExam(
     );
 
 
-    /*
-     * Start timer only after a valid first question is available.
-     */
     startTimer(
       result.endTime
     );
@@ -1702,15 +1503,9 @@ async function initializeExam(
 
 
 /* ============================================================================
- * 9. QUESTION LOADING AND CACHE
+ * 10. QUESTION LOADING
  * ========================================================================== */
 
-/*
- * Load one question.
- *
- * If the question was previously loaded, render it immediately from browser
- * memory without another Apps Script request.
- */
 async function loadQuestion(
   questionNumber,
   options = {}
@@ -1722,20 +1517,6 @@ async function loadQuestion(
     );
 
 
-  if (
-    !Number.isInteger(
-      number
-    ) ||
-    number < 1
-  ) {
-
-    throw new Error(
-      "Invalid question number."
-    );
-
-  }
-
-
   const total =
     Number(
       state.exam?.totalQuestions ||
@@ -1744,12 +1525,16 @@ async function loadQuestion(
 
 
   if (
-    total > 0 &&
-    number > total
+    !Number.isInteger(number) ||
+    number < 1 ||
+    (
+      total > 0 &&
+      number > total
+    )
   ) {
 
     throw new Error(
-      `Question ${number} does not exist. Total questions: ${total}.`
+      "Invalid question number."
     );
 
   }
@@ -1761,11 +1546,6 @@ async function loadQuestion(
   );
 
 
-  /*
-   * CACHE HIT:
-   *
-   * Render immediately.
-   */
   if (
     state.questionCache[number]
   ) {
@@ -1827,9 +1607,6 @@ async function loadQuestion(
     }
 
 
-    /*
-     * Ignore an old response if the student has already moved elsewhere.
-     */
     if (
       requestId !==
       state.questionRequestId
@@ -1844,9 +1621,6 @@ async function loadQuestion(
       number;
 
 
-    /*
-     * Restore server-supplied student answer, if present.
-     */
     const questionID =
       String(
         question.questionID ||
@@ -1859,7 +1633,9 @@ async function loadQuestion(
       String(
         question.studentAnswer ||
         ""
-      ).trim().toUpperCase();
+      )
+        .trim()
+        .toUpperCase();
 
 
     if (questionID) {
@@ -1872,9 +1648,6 @@ async function loadQuestion(
     }
 
 
-    /*
-     * Cache the complete safe question payload.
-     */
     state.questionCache[number] =
       question;
 
@@ -1886,14 +1659,7 @@ async function loadQuestion(
 
     return question;
 
-
   } catch (err) {
-
-    console.error(
-      `Question ${number} loading failed:`,
-      err
-    );
-
 
     error(
       "questionError",
@@ -1903,7 +1669,6 @@ async function loadQuestion(
 
 
     throw err;
-
 
   } finally {
 
@@ -1920,9 +1685,6 @@ async function loadQuestion(
 }
 
 
-/*
- * Render one question.
- */
 function renderQuestion(
   question
 ) {
@@ -2053,7 +1815,9 @@ function renderQuestion(
       question.studentAnswer ||
       state.answers[questionID] ||
       ""
-    ).trim().toUpperCase();
+    )
+      .trim()
+      .toUpperCase();
 
 
   options.forEach(
@@ -2138,24 +1902,9 @@ function renderQuestion(
 
 
 /* ============================================================================
- * 10. ANSWER SAVE
+ * 11. ANSWER SELECTION / SAVE
  * ========================================================================== */
 
-/*
- * Save the selected answer.
- *
- * UX:
- * - Update screen immediately.
- * - Update navigator immediately.
- * - Send one backend request.
- * - Roll back only if the server rejects the save.
- *
- * IMPORTANT:
- * The frontend deliberately does NOT call validateStudentAnswer() because
- * that would add another server round trip for every click.
- *
- * Final correctness and marks are still calculated server-side during submit.
- */
 async function chooseAnswer(
   question,
   selectedKey
@@ -2194,7 +1943,9 @@ async function chooseAnswer(
   const key =
     String(
       selectedKey || ""
-    ).trim().toUpperCase();
+    )
+      .trim()
+      .toUpperCase();
 
 
   if (
@@ -2212,9 +1963,6 @@ async function chooseAnswer(
     "";
 
 
-  /*
-   * Optimistic local update.
-   */
   state.answers[questionID] =
     key;
 
@@ -2315,12 +2063,8 @@ async function chooseAnswer(
 
     updateNavigatorUI();
 
-
   } catch (err) {
 
-    /*
-     * Roll back only the affected answer.
-     */
     state.answers[questionID] =
       previousAnswer;
 
@@ -2397,12 +2141,9 @@ async function chooseAnswer(
 
 
 /* ============================================================================
- * 11. NAVIGATOR
+ * 12. NAVIGATOR
  * ========================================================================== */
 
-/*
- * Render the question navigator.
- */
 function renderNavigator(
   totalQuestions
 ) {
@@ -2532,13 +2273,7 @@ function renderNavigator(
             number
           );
 
-        } catch (err) {
-
-          /*
-           * loadQuestion already displayed the error.
-           */
-
-        }
+        } catch (err) {}
 
       }
     );
@@ -2553,9 +2288,6 @@ function renderNavigator(
 }
 
 
-/*
- * Refresh navigator without contacting the server.
- */
 function updateNavigatorUI() {
 
   const total =
@@ -2576,7 +2308,7 @@ function updateNavigatorUI() {
 
 
 /* ============================================================================
- * 12. PREVIOUS / NEXT NAVIGATION
+ * 13. PREVIOUS / NEXT
  * ========================================================================== */
 
 async function goToQuestion(
@@ -2588,15 +2320,7 @@ async function goToQuestion(
 
 
   if (
-    !Number.isInteger(target)
-  ) {
-
-    return;
-
-  }
-
-
-  if (
+    !Number.isInteger(target) ||
     state.navigationBusy
   ) {
 
@@ -2625,9 +2349,6 @@ async function goToQuestion(
 }
 
 
-/*
- * Previous button.
- */
 if ($("prevBtn")) {
 
   $("prevBtn")
@@ -2651,9 +2372,6 @@ if ($("prevBtn")) {
 }
 
 
-/*
- * Next button.
- */
 if ($("nextBtn")) {
 
   $("nextBtn")
@@ -2689,7 +2407,7 @@ if ($("nextBtn")) {
 
 
 /* ============================================================================
- * 13. SERVER-SYNCHRONIZED TIMER
+ * 14. TIMER
  * ========================================================================== */
 
 function startTimer(
@@ -2707,12 +2425,6 @@ function startTimer(
       endMilliseconds
     )
   ) {
-
-    console.warn(
-      "Invalid exam end time:",
-      endTime
-    );
-
 
     if ($("timer")) {
 
@@ -2824,12 +2536,9 @@ function startTimer(
 
 
 /* ============================================================================
- * 14. SUBMISSION CONFIRMATION
+ * 15. SUBMISSION MODAL
  * ========================================================================== */
 
-/*
- * Open the final submission confirmation modal.
- */
 function openSubmitModal() {
 
   const answered =
@@ -2888,9 +2597,6 @@ function openSubmitModal() {
 }
 
 
-/*
- * Submit button from the exam header.
- */
 if ($("submitTopBtn")) {
 
   $("submitTopBtn")
@@ -2902,9 +2608,6 @@ if ($("submitTopBtn")) {
 }
 
 
-/*
- * Cancel submission.
- */
 if ($("cancelSubmit")) {
 
   $("cancelSubmit")
@@ -2924,9 +2627,6 @@ if ($("cancelSubmit")) {
 }
 
 
-/*
- * Confirm submission.
- */
 if ($("confirmSubmit")) {
 
   $("confirmSubmit")
@@ -2945,24 +2645,9 @@ if ($("confirmSubmit")) {
 
 
 /* ============================================================================
- * 15. FINAL SUBMISSION
+ * 16. FINAL SUBMISSION
  * ========================================================================== */
 
-/*
- * Submit the examination.
- *
- * Only ONE server operation is required here:
- *
- * submitExam(examID)
- *
- * The backend performs the authoritative:
- * - validation
- * - evaluation
- * - score calculation
- * - percentage calculation
- * - EXAM_RECORDS update
- * - completion
- */
 async function doSubmit(
   automaticSubmission = false
 ) {
@@ -3019,11 +2704,12 @@ async function doSubmit(
     state.submitted =
       true;
 
+
     /*
-     * EXAM SECURITY
-     * Security monitoring is active only while the examination is active.
+     * Stop security monitoring BEFORE displaying the result.
      */
     deactivateExamSecurity();
+
 
     window.clearInterval(
       state.timer
@@ -3031,16 +2717,14 @@ async function doSubmit(
 
 
     /*
-     * submitExam() should already return the complete result.
-     * Therefore showResult() does not normally make another request.
+     * showResult() performs one authoritative final-result refresh.
      */
-    showResult(
+    await showResult(
       result
     );
 
 
     loading(false);
-
 
   } catch (err) {
 
@@ -3068,957 +2752,12 @@ async function doSubmit(
 
 
 /* ============================================================================
- * 16. RESULT SCREEN
+ * 17. RESULT NORMALIZATION
  * ========================================================================== */
 
-/*
- * Normalize possible backend result shapes.
- *
- * Supported:
- * 1. Direct result object
- * 2. { summary: {...} }
- * 3. { result: {...} }
- * 4. { data: {...} }
- */
 function normalizeResult(
   response
 ) {
-
-  if (
-    !response ||
-    typeof response !== "object"
-  ) {
-
-    return {};
-
-  }
-
-
-  if (
-    response.summary &&
-    typeof response.summary === "object"
-  ) {
-
-    return response.summary;
-
-  }
-
-
-  if (
-    response.result &&
-    typeof response.result === "object"
-  ) {
-
-    return response.result;
-
-  }
-
-
-  if (
-    response.data &&
-    typeof response.data === "object"
-  ) {
-
-    return response.data;
-
-  }
-
-
-  return response;
-
-}
-
-
-/*
- * Display the final result.
- *
- * IMPORTANT:
- * The percentage is read from the authoritative backend result.
- * If it is unavailable, it is safely calculated from obtained/total marks.
- */
-async function showResult(
-  response
-) {
-
-  let result =
-    normalizeResult(
-      response
-    );
-
-
-  /*
-   * Fallback only:
-   *
-   * If submitExam() returned no usable result, retrieve the final result.
-   * This should normally NOT happen.
-   */
-  if (
-    !result ||
-    !(
-      "obtainedMarks" in result
-    ) ||
-    !(
-      "totalMarks" in result
-    )
-  ) {
-
-    try {
-
-      result =
-        normalizeResult(
-          await gas(
-            "getFinalExamResult",
-            [
-              state.examID
-            ],
-            {
-              maxAttempts: 2,
-              timeoutMilliseconds: 25000
-            }
-          )
-        );
-
-    } catch (err) {
-
-      console.warn(
-        "Final result fallback request failed:",
-        err
-      );
-
-    }
-
-  }
-
-
-  const studentName =
-    result.studentName ||
-    state.exam?.studentName ||
-    (
-      $("studentName")
-        ? $("studentName").value
-        : ""
-    );
-
-
-  const obtained =
-    Number(
-      result.obtainedMarks ??
-      result.score ??
-      0
-    );
-
-
-  const total =
-    Number(
-      result.totalMarks ??
-      state.exam?.totalMarks ??
-      0
-    );
-
-
-  let percentage =
-    Number(
-      result.percentage
-    );
-
-
-  /*
-   * Backend percentage is authoritative.
-   *
-   * Calculation is used only when the backend did not return a finite value.
-   */
-  if (
-    !Number.isFinite(
-      percentage
-    )
-  ) {
-
-    percentage =
-      total > 0
-        ? (
-            obtained /
-            total
-          ) *
-          100
-        : 0;
-
-  }
-
-
-  percentage =
-    Math.max(
-      0,
-      Math.min(
-        100,
-        percentage
-      )
-    );
-
-
-  if ($("resultStudent")) {
-
-    $("resultStudent")
-      .textContent =
-        studentName;
-
-  }
-
-
-  if ($("scorePercent")) {
-
-    $("scorePercent")
-      .textContent =
-        `${Math.round(percentage)}%`;
-
-  }
-
-
-  if ($("scoreValue")) {
-
-    $("scoreValue")
-      .textContent =
-        `${obtained} / ${total}`;
-
-  }
-
-
-  if ($("correctValue")) {
-
-    $("correctValue")
-      .textContent =
-        Number(
-          result.correct || 0
-        );
-
-  }
-
-
-  if ($("wrongValue")) {
-
-    $("wrongValue")
-      .textContent =
-        Number(
-          result.wrong || 0
-        );
-
-  }
-
-
-  if ($("unattemptedValue")) {
-
-    $("unattemptedValue")
-      .textContent =
-        Number(
-          result.unattempted || 0
-        );
-
-  }
-
-
-  /*
-   * The existing CSS uses --score for the circular result indicator.
-   */
-  if (
-    $("scorePercent") &&
-    $("scorePercent").parentElement &&
-    $("scorePercent").parentElement.parentElement
-  ) {
-
-    $("scorePercent")
-      .parentElement
-      .parentElement
-      .style
-      .setProperty(
-        "--score",
-        `${percentage}%`
-      );
-
-  }
-
-
-  /*
-   * Preserve the result locally for possible review navigation.
-   */
-  state.exam =
-    {
-      ...(state.exam || {}),
-      ...result
-    };
-
-
-  show(
-    "resultScreen"
-  );
-
-}
-
-
-/* ============================================================================
- * 17. DETAILED REVIEW
- * ========================================================================== */
-
-/*
- * Load and render the completed examination review.
- */
-if ($("reviewBtn")) {
-
-  $("reviewBtn")
-    .addEventListener(
-      "click",
-      async () => {
-
-        if (
-          !state.examID
-        ) {
-
-          toast(
-            "No completed examination is available."
-          );
-
-
-          return;
-
-        }
-
-
-        try {
-
-          loading(
-            true,
-            "BUILDING REVIEW…"
-          );
-
-
-          const review =
-            await gas(
-              "getDetailedExamReview",
-              [
-                state.examID
-              ],
-              {
-                maxAttempts: 2,
-                timeoutMilliseconds: 35000
-              }
-            );
-
-
-          state.review =
-            review;
-
-
-          renderReview(
-            review
-          );
-
-
-          loading(false);
-
-
-          show(
-            "reviewScreen"
-          );
-
-
-        } catch (err) {
-
-          console.error(
-            "Detailed review failed:",
-            err
-          );
-
-
-          loading(false);
-
-
-          error(
-            "resultError",
-            err.message ||
-            "Unable to load detailed review."
-          );
-
-
-          toast(
-            err.message ||
-            "Unable to load detailed review."
-          );
-
-        }
-
-      }
-    );
-
-}
-
-
-/*
- * Render detailed review.
- *
- * CorrectAnswer is intentionally used ONLY after the backend has completed
- * the examination and explicitly authorizes detailed review.
- */
-function renderReview(
-  data
-) {
-
-  const rows =
-    Array.isArray(data)
-      ? data
-      : (
-          data?.questions ||
-          data?.review ||
-          data?.records ||
-          []
-        );
-
-
-  const reviewList =
-    $("reviewList");
-
-
-  if (!reviewList) {
-    return;
-  }
-
-
-  if (
-    rows.length === 0
-  ) {
-
-    reviewList.innerHTML =
-      `
-        <div class="panel review-item">
-          No detailed review records were returned.
-        </div>
-      `;
-
-
-    return;
-
-  }
-
-
-  reviewList.innerHTML =
-    rows
-      .map(
-        (record, index) => {
-
-          const question =
-            record.question ??
-            record.Question ??
-            "";
-
-
-          const studentAnswer =
-            String(
-              record.studentAnswer ??
-              record.StudentAnswer ??
-              ""
-            )
-              .trim()
-              .toUpperCase();
-
-
-          const correctAnswer =
-            String(
-              record.correctAnswer ??
-              record.CorrectAnswer ??
-              ""
-            )
-              .trim()
-              .toUpperCase();
-
-
-          const result =
-            String(
-              record.result ??
-              record.Result ??
-              ""
-            )
-              .trim()
-              .toUpperCase();
-
-
-          const explanation =
-            record.explanation ??
-            record.Explanation ??
-            "";
-
-
-          const options = [
-
-            [
-              "A",
-              record.optionA ??
-              record.OptionA ??
-              ""
-            ],
-
-            [
-              "B",
-              record.optionB ??
-              record.OptionB ??
-              ""
-            ],
-
-            [
-              "C",
-              record.optionC ??
-              record.OptionC ??
-              ""
-            ],
-
-            [
-              "D",
-              record.optionD ??
-              record.OptionD ??
-              ""
-            ]
-
-          ];
-
-
-          return `
-            <article class="review-item panel">
-
-              <div class="review-meta">
-
-                <span>
-                  QUESTION ${String(index + 1).padStart(2, "0")}
-                </span>
-
-                <span class="review-badge">
-                  ${escapeHtml(result || "REVIEW")}
-                </span>
-
-              </div>
-
-
-              <div class="review-q">
-                ${escapeHtml(question)}
-              </div>
-
-
-              <div class="review-options">
-
-                ${options
-                  .map(
-                    ([key, value]) => `
-
-                      <div class="review-option ${
-                        key === correctAnswer
-                          ? "correct"
-                          : ""
-                      } ${
-                        key === studentAnswer &&
-                        studentAnswer !== correctAnswer
-                          ? "wrong"
-                          : ""
-                      }">
-
-                        <b>${key}</b>
-
-                        ${escapeHtml(value)}
-
-                      </div>
-
-                    `
-                  )
-                  .join("")}
-
-              </div>
-
-
-              ${
-                explanation
-                  ? `
-                    <div class="review-explanation">
-                      ${escapeHtml(explanation)}
-                    </div>
-                  `
-                  : ""
-              }
-
-            </article>
-          `;
-
-        }
-      )
-      .join("");
-
-}
-
-
-/* ============================================================================
- * 18. RESULT / REVIEW NAVIGATION
- * ========================================================================== */
-
-/*
- * Return from review to result.
- */
-if ($("reviewBack")) {
-
-  $("reviewBack")
-    .addEventListener(
-      "click",
-      () => {
-
-        show(
-          "resultScreen"
-        );
-
-      }
-    );
-
-}
-
-
-/*
- * Start a completely fresh examination.
- */
-if ($("restartBtn")) {
-
-  $("restartBtn")
-    .addEventListener(
-      "click",
-      () => {
-
-        /*
-         * Clear only browser-side examination state.
-         * Completed backend records remain untouched.
-         */
-        window.clearInterval(
-          state.timer
-        );
-
-
-        state.examID =
-          null;
-
-
-        state.exam =
-          null;
-
-
-        state.current =
-          1;
-
-
-        state.answers =
-          {};
-
-
-        state.navigator =
-          {};
-
-
-        state.questionCache =
-          {};
-
-
-        state.submitted =
-          false;
-
-
-        state.submitting =
-          false;
-
-
-        state.review =
-          null;
-
-
-        state.questionRequestId =
-          0;
-
-
-        /*
-         * Return to start screen.
-         */
-        show(
-          "startScreen"
-        );
-
-
-        /*
-         * Keep catalog available from session cache.
-         */
-        resetDependentDropdowns();
-
-
-        setOptions(
-          "stream",
-          hierarchy.streams,
-          "SELECT STREAM",
-          hierarchy.streams.length === 0
-        );
-
-
-        if ($("startForm")) {
-
-          $("startForm")
-            .reset();
-
-        }
-
-
-        /*
-         * Restore question count after form reset.
-         */
-        if ($("questionCount")) {
-
-          $("questionCount")
-            .value =
-              "20";
-
-        }
-
-
-        error(
-          "startError",
-          ""
-        );
-
-
-        error(
-          "resultError",
-          ""
-        );
-
-
-        if ($("saveStatus")) {
-
-          $("saveStatus")
-            .textContent =
-              "READY";
-
-        }
-
-      }
-    );
-
-}
-
-
-/* ============================================================================
- * 19. START FORM EVENT
- * ========================================================================== */
-
-if ($("startForm")) {
-
-  $("startForm")
-    .addEventListener(
-      "submit",
-      initializeExam
-    );
-
-}
-
-
-/* ============================================================================
- * 20. OPTIONAL DIAGNOSTIC FUNCTION
- * ========================================================================== */
-
-/*
- * Run this from the browser console:
- *
- *     testBackendConfiguration()
- *
- * It confirms that the browser is executing THIS app.js and using the
- * expected production Apps Script URL.
- */
-function testBackendConfiguration() {
-
-  console.log(
-    "=============================================="
-  );
-
-
-  console.log(
-    "NOOTECH BACKEND CONFIGURATION TEST"
-  );
-
-
-  console.log(
-    "=============================================="
-  );
-
-
-  console.log(
-    "GAS_WEB_APP_URL:",
-    GAS_WEB_APP_URL
-  );
-
-
-  try {
-
-    assertConfig();
-
-
-    console.log(
-      "Configuration: PASSED"
-    );
-
-
-    console.log(
-      "API example:",
-      buildApiUrl(
-        "getExamHierarchy",
-        []
-      )
-    );
-
-
-  } catch (err) {
-
-    console.error(
-      "Configuration: FAILED",
-      err
-    );
-
-  }
-
-
-  console.log(
-    "=============================================="
-  );
-
-}
-
-
-/* ============================================================================
- * 21. APPLICATION STARTUP
- * ========================================================================== */
-
-/*
- * EXECUTION ORDER
- * ----------------------------------------------------------------------------
- *
- * PAGE LOAD
- *   ↓
- * wireHierarchyDropdowns()
- *   ↓
- * loadExamHierarchy()
- *   ↓
- * Stream becomes available
- *   ↓
- * Student selects Stream
- *   ↓
- * Year becomes available
- *   ↓
- * Student selects Year
- *   ↓
- * Unit becomes available
- *   ↓
- * Student selects Unit
- *   ↓
- * Chapter becomes available
- *   ↓
- * Student submits Mission Config
- *   ↓
- * createExamSession()
- *   ↓
- * Navigator created locally from returned question list
- *   ↓
- * Question 1 loaded
- *   ↓
- * Timer starts
- *   ↓
- * Student answers questions
- *   ↓
- * One saveStudentAnswer() request per answer
- *   ↓
- * Cached questions load instantly when revisited
- *   ↓
- * submitExam()
- *   ↓
- * Final score / percentage displayed
- *   ↓
- * Detailed review loaded only after completion
- *
- * NO SERVER NAVIGATOR REQUEST IS REQUIRED DURING NORMAL STARTUP.
- * ============================================================================
- */
-
-wireHierarchyDropdowns();
-
-loadExamHierarchy();
-
-console.info(
-  "NOOTECH Online Exam frontend initialized."
-);
-
-
-/* ============================================================================
- * 22. POST-SUBMISSION GOOGLE REVIEW + RESULT ENHANCEMENT
- * ============================================================================
- *
- * FINAL CANDIDATE FLOW
- * ----------------------------------------------------------------------------
- *
- * EXAM SUBMIT
- *     ↓
- * RESULT SCREEN
- *     ↓
- * SCORE / PERCENTAGE / CORRECT / WRONG / UNATTEMPTED
- *     ↓
- * GOOGLE BUSINESS REVIEW GATE
- *     ↓
- * CANDIDATE OPENS GOOGLE REVIEW
- *     ↓
- * CANDIDATE CONFIRMS REVIEW SUBMISSION
- *     ↓
- * DETAILED QUESTION REVIEW
- *
- * IMPORTANT:
- * Google does not expose a reliable client-side signal proving that a review
- * was actually published. Therefore the application uses an explicit
- * confirmation gate. The detailed review cannot be opened through the UI until
- * the candidate checks the confirmation box.
- *
- * REQUIRED CONFIGURATION:
- * Set GOOGLE_REVIEW_URL to the direct Google "Write a review" URL for the
- * business. This is intentionally separate from the Apps Script URL.
- * ========================================================================== */
-
-
-/* ============================================================================
- * 22.1 GOOGLE BUSINESS REVIEW URL
- * ========================================================================== */
-
-/*
- * Replace the value below with your actual Google Business "Write a review"
- * link.
- *
- * Examples:
- *
- * https://g.page/r/XXXXXXXXXXXX/review
- *
- * OR
- *
- * https://search.google.com/local/writereview?placeid=XXXXXXXXXXXX
- */
-const GOOGLE_REVIEW_URL =
-  "PASTE_YOUR_GOOGLE_REVIEW_LINK_HERE";
-
-
-/* ============================================================================
- * 22.2 RESULT NORMALIZATION
- * ========================================================================== */
-
-/*
- * The backend may return any of these structures:
- *
- * A) { obtainedMarks, totalMarks, percentage, ... }
- *
- * B) { result: { obtainedMarks, totalMarks, percentage, ... } }
- *
- * C) { summary: { obtainedMarks, totalMarks, percentage, ... } }
- *
- * D) { data: { ... } }
- *
- * This function safely unwraps all supported structures.
- */
-function nootechNormalizeFinalResult(response) {
 
   let result =
     response &&
@@ -4034,7 +2773,6 @@ function nootechNormalizeFinalResult(response) {
   ) {
 
     if (
-      result &&
       result.summary &&
       typeof result.summary === "object"
     ) {
@@ -4048,7 +2786,6 @@ function nootechNormalizeFinalResult(response) {
 
 
     if (
-      result &&
       result.result &&
       typeof result.result === "object"
     ) {
@@ -4062,7 +2799,6 @@ function nootechNormalizeFinalResult(response) {
 
 
     if (
-      result &&
       result.data &&
       typeof result.data === "object"
     ) {
@@ -4086,178 +2822,106 @@ function nootechNormalizeFinalResult(response) {
 
 
 /* ============================================================================
- * 22.3 RESULT SCREEN RENDERER — FINAL OVERRIDE
+ * 18. FINAL SCORE / PERCENTAGE
  * ========================================================================== */
 
-/*
- * This complete replacement guarantees that the result screen receives the
- * final score from the completed backend session.
- *
- * If submitExam() does not contain the complete score, getFinalExamResult()
- * is used as a fallback.
- */
-async function showResult(response) {
+async function showResult(
+  response
+) {
 
   let result =
-    nootechNormalizeFinalResult(
+    normalizeResult(
       response
     );
 
 
   /*
-   * ------------------------------------------------------------
-   * Check whether the response actually contains score data.
-   * ------------------------------------------------------------
+   * ALWAYS refresh the persisted final result.
+   *
+   * This guarantees that the result screen does not display stale
+   * or incomplete submitExam() data.
    */
-  let obtained =
+  try {
+
+    const finalResponse =
+      await gas(
+        "getFinalExamResult",
+        [
+          state.examID
+        ],
+        {
+          maxAttempts: 2,
+          timeoutMilliseconds: 30000
+        }
+      );
+
+
+    const freshResult =
+      normalizeResult(
+        finalResponse
+      );
+
+
+    if (
+      freshResult &&
+      typeof freshResult === "object"
+    ) {
+
+      result =
+        freshResult;
+
+    }
+
+  } catch (err) {
+
+    console.warn(
+      "Final result refresh failed; using submit response:",
+      err
+    );
+
+  }
+
+
+  const obtainedRaw =
     Number(
       result.obtainedMarks ??
       result.score
     );
 
 
-  let total =
+  const totalRaw =
     Number(
-      result.totalMarks
+      result.totalMarks ??
+      state.exam?.totalMarks
     );
 
 
-  /*
-   * ------------------------------------------------------------
-   * Fallback to the authoritative final-result endpoint.
-   * ------------------------------------------------------------
-   */
-  if (
-    !Number.isFinite(obtained) ||
-    !Number.isFinite(total)
-  ) {
-
-    try {
-
-      const finalResponse =
-        await gas(
-          "getFinalExamResult",
-          [
-            state.examID
-          ],
-          {
-            maxAttempts: 2,
-            timeoutMilliseconds: 30000
-          }
-        );
+  const obtained =
+    Number.isFinite(
+      obtainedRaw
+    )
+      ? obtainedRaw
+      : 0;
 
 
-      result =
-        nootechNormalizeFinalResult(
-          finalResponse
-        );
+  const total =
+    Number.isFinite(
+      totalRaw
+    )
+      ? totalRaw
+      : 0;
 
 
-      obtained =
-        Number(
-          result.obtainedMarks ??
-          result.score ??
-          0
-        );
-
-
-      total =
-        Number(
-          result.totalMarks ??
-          0
-        );
-
-    } catch (err) {
-
-      console.error(
-        "Unable to retrieve final result:",
-        err
-      );
-
-
-      /*
-       * Use the examination metadata as a final safe fallback.
-       */
-      obtained =
-        Number(
-          result.obtainedMarks ??
-          result.score ??
-          0
-        );
-
-
-      total =
-        Number(
-          result.totalMarks ??
-          state.exam?.totalMarks ??
-          0
-        );
-
-    }
-
-  }
-
-
-  if (
-    !Number.isFinite(obtained)
-  ) {
-
-    obtained =
-      0;
-
-  }
-
-
-  if (
-    !Number.isFinite(total)
-  ) {
-
-    total =
-      0;
-
-  }
-
-
-  /*
-   * ------------------------------------------------------------
-   * Candidate statistics.
-   * ------------------------------------------------------------
-   */
-  const correct =
-    Number(
-      result.correct ??
-      0
-    );
-
-
-  const wrong =
-    Number(
-      result.wrong ??
-      0
-    );
-
-
-  const unattempted =
-    Number(
-      result.unattempted ??
-      0
-    );
-
-
-  /*
-   * ------------------------------------------------------------
-   * Percentage.
-   *
-   * Backend value is preferred.
-   * Local calculation is only a fallback.
-   * ------------------------------------------------------------
-   */
   let percentage =
     Number(
       result.percentage
     );
 
 
+  /*
+   * Backend percentage is authoritative.
+   * Local calculation is ONLY the fallback.
+   */
   if (
     !Number.isFinite(
       percentage
@@ -4286,28 +2950,39 @@ async function showResult(response) {
         )
       ) *
       100
-    ) / 100;
+    ) /
+    100;
 
 
-  /*
-   * ------------------------------------------------------------
-   * Candidate name.
-   * ------------------------------------------------------------
-   */
+  const correct =
+    Number(
+      result.correct
+    ) || 0;
+
+
+  const wrong =
+    Number(
+      result.wrong
+    ) || 0;
+
+
+  const unattempted =
+    Number(
+      result.unattempted
+    ) || 0;
+
+
   const studentName =
     String(
       result.studentName ||
       state.exam?.studentName ||
-      $("resultStudent")?.textContent ||
       $("studentName")?.value ||
       "CANDIDATE"
     ).trim();
 
 
   /*
-   * ------------------------------------------------------------
-   * Save complete result in state.
-   * ------------------------------------------------------------
+   * Preserve complete final result in state.
    */
   state.exam =
     {
@@ -4339,9 +3014,7 @@ async function showResult(response) {
 
 
   /*
-   * ------------------------------------------------------------
-   * Populate every result field.
-   * ------------------------------------------------------------
+   * Result screen.
    */
   if ($("resultStudent")) {
 
@@ -4356,7 +3029,7 @@ async function showResult(response) {
 
     $("scorePercent")
       .textContent =
-        `${percentage}%`;
+        `${Math.round(percentage)}%`;
 
   }
 
@@ -4397,11 +3070,6 @@ async function showResult(response) {
   }
 
 
-  /*
-   * ------------------------------------------------------------
-   * Update score-ring CSS custom property.
-   * ------------------------------------------------------------
-   */
   const scoreRing =
     document.querySelector(
       "#resultScreen .score-ring"
@@ -4415,21 +3083,12 @@ async function showResult(response) {
       `${percentage}%`
     );
 
+
     scoreRing.style.setProperty(
       "--percentage",
       `${percentage}%`
     );
 
-  }
-
-
-  /*
-   * Some UI themes use the ring's ::before background instead of
-   * --score. Inject a safe conic-gradient only when required.
-   *
-   * Existing theme colors remain inherited from CSS variables.
-   */
-  if (scoreRing) {
 
     scoreRing.style.background =
       `conic-gradient(
@@ -4440,11 +3099,6 @@ async function showResult(response) {
   }
 
 
-  /*
-   * ------------------------------------------------------------
-   * Change the result button to the mandatory Google review step.
-   * ------------------------------------------------------------
-   */
   if ($("reviewBtn")) {
 
     $("reviewBtn")
@@ -4454,11 +3108,6 @@ async function showResult(response) {
   }
 
 
-  /*
-   * ------------------------------------------------------------
-   * Show result FIRST.
-   * ------------------------------------------------------------
-   */
   show(
     "resultScreen"
   );
@@ -4489,13 +3138,22 @@ async function showResult(response) {
 
 
 /* ============================================================================
- * 22.4 GOOGLE REVIEW SCREEN CREATOR
+ * 19. GOOGLE REVIEW
  * ========================================================================== */
 
-/*
- * Creates the review screen dynamically so index.html does not have to be
- * modified.
- */
+function isGoogleReviewConfigured() {
+
+  return (
+    typeof GOOGLE_REVIEW_URL === "string" &&
+    GOOGLE_REVIEW_URL.trim() !== "" &&
+    !GOOGLE_REVIEW_URL.includes(
+      "PASTE_YOUR_GOOGLE_REVIEW_LINK_HERE"
+    )
+  );
+
+}
+
+
 function ensureGoogleReviewScreen() {
 
   if (
@@ -4640,11 +3298,6 @@ function ensureGoogleReviewScreen() {
   );
 
 
-  /*
-   * ------------------------------------------------------------
-   * Theme-compatible styles.
-   * ------------------------------------------------------------
-   */
   const style =
     document.createElement(
       "style"
@@ -4781,23 +3434,18 @@ function ensureGoogleReviewScreen() {
   );
 
 
-  /*
-   * ------------------------------------------------------------
-   * Open Google Business review page.
-   * ------------------------------------------------------------
-   */
   $("openGoogleReviewBtn")
     .addEventListener(
       "click",
       () => {
 
-        const reviewError =
-          $("googleReviewError");
-
-
         if (
           !isGoogleReviewConfigured()
         ) {
+
+          const reviewError =
+            $("googleReviewError");
+
 
           if (reviewError) {
 
@@ -4817,9 +3465,6 @@ function ensureGoogleReviewScreen() {
         }
 
 
-        /*
-         * Open in a separate tab so the exam result remains intact.
-         */
         const opened =
           window.open(
             GOOGLE_REVIEW_URL,
@@ -4829,6 +3474,10 @@ function ensureGoogleReviewScreen() {
 
 
         if (!opened) {
+
+          const reviewError =
+            $("googleReviewError");
+
 
           if (reviewError) {
 
@@ -4848,18 +3497,6 @@ function ensureGoogleReviewScreen() {
         }
 
 
-        if (reviewError) {
-
-          reviewError.textContent =
-            "";
-
-          reviewError.classList.add(
-            "hidden"
-          );
-
-        }
-
-
         toast(
           "Google review opened in a new tab."
         );
@@ -4868,11 +3505,6 @@ function ensureGoogleReviewScreen() {
     );
 
 
-  /*
-   * ------------------------------------------------------------
-   * Candidate confirmation checkbox.
-   * ------------------------------------------------------------
-   */
   $("googleReviewConfirmed")
     .addEventListener(
       "change",
@@ -4886,11 +3518,6 @@ function ensureGoogleReviewScreen() {
     );
 
 
-  /*
-   * ------------------------------------------------------------
-   * Unlock detailed review.
-   * ------------------------------------------------------------
-   */
   $("continueToDetailedReviewBtn")
     .addEventListener(
       "click",
@@ -4916,11 +3543,6 @@ function ensureGoogleReviewScreen() {
     );
 
 
-  /*
-   * ------------------------------------------------------------
-   * Return to result.
-   * ------------------------------------------------------------
-   */
   $("backToResultFromGoogleBtn")
     .addEventListener(
       "click",
@@ -4935,26 +3557,6 @@ function ensureGoogleReviewScreen() {
 
 }
 
-
-/*
- * Check whether the business review URL is configured.
- */
-function isGoogleReviewConfigured() {
-
-  return (
-    typeof GOOGLE_REVIEW_URL === "string" &&
-    GOOGLE_REVIEW_URL.trim() !== "" &&
-    !GOOGLE_REVIEW_URL.includes(
-      "PASTE_YOUR_GOOGLE_REVIEW_LINK_HERE"
-    )
-  );
-
-}
-
-
-/* ============================================================================
- * 22.5 GOOGLE REVIEW GATE
- * ========================================================================== */
 
 function openGoogleReviewGate() {
 
@@ -4976,9 +3578,6 @@ function openGoogleReviewGate() {
   }
 
 
-  /*
-   * Every completed exam gets a fresh confirmation gate.
-   */
   if ($("googleReviewConfirmed")) {
 
     $("googleReviewConfirmed")
@@ -5027,8 +3626,31 @@ function openGoogleReviewGate() {
 }
 
 
+/*
+ * Mandatory Google review gate.
+ */
+if ($("reviewBtn")) {
+
+  $("reviewBtn")
+    .addEventListener(
+      "click",
+      event => {
+
+        event.preventDefault();
+
+        event.stopImmediatePropagation();
+
+        openGoogleReviewGate();
+
+      },
+      true
+    );
+
+}
+
+
 /* ============================================================================
- * 22.6 DETAILED REVIEW LOADER
+ * 20. DETAILED REVIEW
  * ========================================================================== */
 
 async function openDetailedReview() {
@@ -5130,10 +3752,9 @@ async function openDetailedReview() {
 }
 
 
-/* ============================================================================
- * 22.7 DETAILED REVIEW RENDERER — STUDENT NAME INCLUDED
- * ========================================================================== */
-
+/*
+ * ONLY ONE renderReview() function exists in the final version.
+ */
 function renderReview(
   data
 ) {
@@ -5167,11 +3788,6 @@ function renderReview(
   }
 
 
-  /*
-   * ------------------------------------------------------------
-   * Add candidate name to the review header once.
-   * ------------------------------------------------------------
-   */
   const reviewHeader =
     reviewScreen.querySelector(
       ".review-header"
@@ -5229,11 +3845,6 @@ function renderReview(
   }
 
 
-  /*
-   * ------------------------------------------------------------
-   * Empty review.
-   * ------------------------------------------------------------
-   */
   if (
     rows.length === 0
   ) {
@@ -5251,11 +3862,6 @@ function renderReview(
   }
 
 
-  /*
-   * ------------------------------------------------------------
-   * Question-wise review.
-   * ------------------------------------------------------------
-   */
   reviewList.innerHTML =
     rows
       .map(
@@ -5461,99 +4067,226 @@ function renderReview(
 
 
 /* ============================================================================
- * 22.8 REPLACE THE ORIGINAL REVIEW-BUTTON ACTION
+ * 21. RESULT / REVIEW / RESTART NAVIGATION
  * ========================================================================== */
 
-/*
- * The original app.js already has a reviewBtn click handler.
- *
- * This capture-phase handler stops the old handler from bypassing the Google
- * review gate. It is intentionally installed after all original code.
- */
-if ($("reviewBtn")) {
+if ($("reviewBack")) {
 
-  $("reviewBtn")
+  $("reviewBack")
     .addEventListener(
       "click",
-      event => {
+      () => {
 
-        event.preventDefault();
+        show(
+          "resultScreen"
+        );
 
-        event.stopImmediatePropagation();
+      }
+    );
 
-        openGoogleReviewGate();
+}
 
-      },
-      true
+
+if ($("restartBtn")) {
+
+  $("restartBtn")
+    .addEventListener(
+      "click",
+      () => {
+
+        deactivateExamSecurity();
+
+
+        window.clearInterval(
+          state.timer
+        );
+
+
+        state.examID =
+          null;
+
+
+        state.exam =
+          null;
+
+
+        state.current =
+          1;
+
+
+        state.answers =
+          {};
+
+
+        state.navigator =
+          {};
+
+
+        state.questionCache =
+          {};
+
+
+        state.submitted =
+          false;
+
+
+        state.submitting =
+          false;
+
+
+        state.review =
+          null;
+
+
+        state.questionRequestId =
+          0;
+
+
+        state.navigationBusy =
+          false;
+
+
+        show(
+          "startScreen"
+        );
+
+
+        resetDependentDropdowns();
+
+
+        setOptions(
+          "stream",
+          hierarchy.streams,
+          "SELECT STREAM",
+          hierarchy.streams.length === 0
+        );
+
+
+        if ($("startForm")) {
+
+          $("startForm")
+            .reset();
+
+        }
+
+
+        if ($("questionCount")) {
+
+          $("questionCount")
+            .value =
+              "20";
+
+        }
+
+
+        error(
+          "startError",
+          ""
+        );
+
+
+        error(
+          "resultError",
+          ""
+        );
+
+
+        if ($("saveStatus")) {
+
+          $("saveStatus")
+            .textContent =
+              "READY";
+
+        }
+
+      }
     );
 
 }
 
 
 /* ============================================================================
- * 22.9 STARTUP DIAGNOSTIC
- * ========================================================================== */
-
-console.info(
-  "NOOTECH POST-SUBMISSION FLOW:",
-  "RESULT → GOOGLE REVIEW → DETAILED REVIEW"
-);
-
-console.info(
-  "NOOTECH GOOGLE REVIEW CONFIGURED:",
-  isGoogleReviewConfigured()
-);
-
-
-
-/* ============================================================================
- * 23. EXAM SECURITY / BROWSER FOCUS MONITOR
- * ============================================================================
- *
- * Browser-level exam security:
- * - Fullscreen request at exam start
- * - Tab/page visibility detection
- * - Window/application focus-loss detection
- * - Fullscreen-exit detection
- * - Common browser shortcut blocking
- * - Right-click blocking
- * - Violation counter and automatic submission
- * - Optional Apps Script security audit logging
- *
- * A normal web page cannot physically lock Windows or guarantee prevention of
- * Alt+Tab, Task Manager, another application, another monitor, etc.
- * True OS-level lockdown requires a managed kiosk browser/device.
+ * 22. EXAM SECURITY
  * ========================================================================== */
 
 const EXAM_SECURITY_CONFIG = {
-  enabled: true,
-  maxViolations: 3,
-  startupGraceMilliseconds: 2500,
-  violationDebounceMilliseconds: 1500,
-  requestFullscreen: true,
-  blockBrowserShortcuts: true,
-  backendLogging: true,
-  backendLogFunction: "logExamSecurityViolation"
+
+  enabled:
+    true,
+
+  maxViolations:
+    3,
+
+  startupGraceMilliseconds:
+    2500,
+
+  violationDebounceMilliseconds:
+    1500,
+
+  requestFullscreen:
+    true,
+
+  blockBrowserShortcuts:
+    true,
+
+  backendLogging:
+    true,
+
+  backendLogFunction:
+    "logExamSecurityViolation"
+
 };
+
 
 const examSecurity = {
-  active: false,
-  violations: 0,
-  lastViolationAt: 0,
-  startupAt: 0,
-  fullscreenRequested: false,
-  handlersInstalled: false,
-  autoSubmitting: false,
-  boundVisibility: null,
-  boundBlur: null,
-  boundFocus: null,
-  boundFullscreen: null,
-  boundKeydown: null,
-  boundContextMenu: null,
-  boundBeforeUnload: null
+
+  active:
+    false,
+
+  violations:
+    0,
+
+  lastViolationAt:
+    0,
+
+  startupAt:
+    0,
+
+  fullscreenRequested:
+    false,
+
+  handlersInstalled:
+    false,
+
+  autoSubmitting:
+    false,
+
+  boundVisibility:
+    null,
+
+  boundBlur:
+    null,
+
+  boundFocus:
+    null,
+
+  boundFullscreen:
+    null,
+
+  boundKeydown:
+    null,
+
+  boundContextMenu:
+    null,
+
+  boundBeforeUnload:
+    null
+
 };
 
+
 function isExamSecurityActive() {
+
   return (
     EXAM_SECURITY_CONFIG.enabled === true &&
     examSecurity.active === true &&
@@ -5561,329 +4294,920 @@ function isExamSecurityActive() {
     state.submitted === false &&
     state.submitting === false
   );
+
 }
+
 
 function ensureExamSecurityUI() {
-  if ($("nootechSecurityStatus")) return;
 
-  const examScreen = $("examScreen");
-  if (!examScreen) return;
+  if (
+    $("nootechSecurityStatus")
+  ) {
 
-  const status = document.createElement("div");
-  status.id = "nootechSecurityStatus";
+    return;
 
-  status.innerHTML = `
-    <span class="nootech-security-dot"></span>
-    <span class="nootech-security-text">EXAM SECURITY ACTIVE</span>
-    <span class="nootech-security-count">VIOLATIONS: 0/${EXAM_SECURITY_CONFIG.maxViolations}</span>
-  `;
-
-  status.style.cssText = `
-    position:fixed;
-    right:16px;
-    bottom:16px;
-    z-index:9998;
-    display:flex;
-    align-items:center;
-    gap:8px;
-    padding:9px 12px;
-    border:1px solid rgba(255,255,255,.18);
-    border-radius:10px;
-    background:rgba(8,12,20,.92);
-    color:#fff;
-    font:700 11px/1.2 Arial,sans-serif;
-    letter-spacing:.5px;
-    box-shadow:0 8px 24px rgba(0,0,0,.28);
-    pointer-events:none;
-    backdrop-filter:blur(8px);
-  `;
-
-  const dot = status.querySelector(".nootech-security-dot");
-  if (dot) {
-    dot.style.cssText = `
-      width:8px;height:8px;border-radius:50%;
-      background:#22c55e;
-      box-shadow:0 0 10px rgba(34,197,94,.8);
-      flex:0 0 auto;
-    `;
   }
 
-  examScreen.appendChild(status);
+
+  const examScreen =
+    $("examScreen");
+
+
+  if (!examScreen) {
+    return;
+  }
+
+
+  const status =
+    document.createElement(
+      "div"
+    );
+
+
+  status.id =
+    "nootechSecurityStatus";
+
+
+  status.innerHTML =
+    `
+      <span class="nootech-security-dot"></span>
+
+      <span class="nootech-security-text">
+        EXAM SECURITY ACTIVE
+      </span>
+
+      <span class="nootech-security-count">
+        VIOLATIONS: 0/${EXAM_SECURITY_CONFIG.maxViolations}
+      </span>
+    `;
+
+
+  status.style.cssText =
+    `
+      position:fixed;
+      right:16px;
+      bottom:16px;
+      z-index:9998;
+      display:flex;
+      align-items:center;
+      gap:8px;
+      padding:9px 12px;
+      border:1px solid rgba(255,255,255,.18);
+      border-radius:10px;
+      background:rgba(8,12,20,.92);
+      color:#fff;
+      font:700 11px/1.2 Arial,sans-serif;
+      letter-spacing:.5px;
+      box-shadow:0 8px 24px rgba(0,0,0,.28);
+      pointer-events:none;
+      backdrop-filter:blur(8px);
+    `;
+
+
+  const dot =
+    status.querySelector(
+      ".nootech-security-dot"
+    );
+
+
+  if (dot) {
+
+    dot.style.cssText =
+      `
+        width:8px;
+        height:8px;
+        border-radius:50%;
+        background:#22c55e;
+        box-shadow:0 0 10px rgba(34,197,94,.8);
+        flex:0 0 auto;
+      `;
+
+  }
+
+
+  examScreen.appendChild(
+    status
+  );
+
 }
 
-function updateExamSecurityUI(message = "") {
-  const status = $("nootechSecurityStatus");
-  if (!status) return;
 
-  const countNode = status.querySelector(".nootech-security-count");
-  const textNode = status.querySelector(".nootech-security-text");
-  const dot = status.querySelector(".nootech-security-dot");
+function updateExamSecurityUI(
+  message = ""
+) {
+
+  const status =
+    $("nootechSecurityStatus");
+
+
+  if (!status) {
+    return;
+  }
+
+
+  const countNode =
+    status.querySelector(
+      ".nootech-security-count"
+    );
+
+
+  const textNode =
+    status.querySelector(
+      ".nootech-security-text"
+    );
+
+
+  const dot =
+    status.querySelector(
+      ".nootech-security-dot"
+    );
+
 
   if (countNode) {
+
     countNode.textContent =
       `VIOLATIONS: ${examSecurity.violations}/${EXAM_SECURITY_CONFIG.maxViolations}`;
+
   }
 
-  if (message && textNode) {
-    textNode.textContent = message;
+
+  if (
+    message &&
+    textNode
+  ) {
+
+    textNode.textContent =
+      message;
+
   }
+
 
   if (dot) {
-    if (examSecurity.violations >= EXAM_SECURITY_CONFIG.maxViolations) {
-      dot.style.background = "#ef4444";
-      dot.style.boxShadow = "0 0 10px rgba(239,68,68,.9)";
-    } else if (examSecurity.violations > 0) {
-      dot.style.background = "#f59e0b";
-      dot.style.boxShadow = "0 0 10px rgba(245,158,11,.9)";
+
+    if (
+      examSecurity.violations >=
+      EXAM_SECURITY_CONFIG.maxViolations
+    ) {
+
+      dot.style.background =
+        "#ef4444";
+
+      dot.style.boxShadow =
+        "0 0 10px rgba(239,68,68,.9)";
+
+    } else if (
+      examSecurity.violations > 0
+    ) {
+
+      dot.style.background =
+        "#f59e0b";
+
+      dot.style.boxShadow =
+        "0 0 10px rgba(245,158,11,.9)";
+
     } else {
-      dot.style.background = "#22c55e";
-      dot.style.boxShadow = "0 0 10px rgba(34,197,94,.8)";
+
+      dot.style.background =
+        "#22c55e";
+
+      dot.style.boxShadow =
+        "0 0 10px rgba(34,197,94,.8)";
+
     }
+
   }
+
 }
 
-function showExamSecurityWarning(message) {
+
+function showExamSecurityWarning(
+  message
+) {
+
   try {
-    toast(message);
+
+    toast(
+      message
+    );
+
   } catch (err) {
-    console.warn("Security warning:", message);
+
+    console.warn(
+      "Security warning:",
+      message
+    );
+
   }
+
 }
+
 
 async function requestExamFullscreen() {
+
   if (
     !EXAM_SECURITY_CONFIG.requestFullscreen ||
     !document.documentElement ||
     typeof document.documentElement.requestFullscreen !== "function"
   ) {
+
     return false;
+
   }
 
-  if (document.fullscreenElement) {
-    examSecurity.fullscreenRequested = true;
+
+  if (
+    document.fullscreenElement
+  ) {
+
+    examSecurity.fullscreenRequested =
+      true;
+
+
     return true;
+
   }
+
 
   try {
-    await document.documentElement.requestFullscreen();
-    examSecurity.fullscreenRequested = true;
+
+    await document
+      .documentElement
+      .requestFullscreen();
+
+
+    examSecurity.fullscreenRequested =
+      true;
+
+
     return true;
+
   } catch (err) {
-    console.warn("NOOTECH fullscreen request was denied:", err);
+
+    console.warn(
+      "NOOTECH fullscreen request was denied:",
+      err
+    );
+
+
     return false;
+
   }
+
 }
 
-function securityEventDescription(type) {
+
+function securityEventDescription(
+  type
+) {
+
   const descriptions = {
-    TAB_SWITCH: "Browser tab or page visibility changed.",
-    WINDOW_BLUR: "Exam browser window lost focus.",
-    FULLSCREEN_EXIT: "Browser fullscreen mode was exited.",
-    SHORTCUT: "A restricted browser shortcut was pressed.",
-    CONTEXT_MENU: "Context menu was requested during the exam."
+
+    TAB_SWITCH:
+      "Browser tab or page visibility changed.",
+
+    WINDOW_BLUR:
+      "Exam browser window lost focus.",
+
+    FULLSCREEN_EXIT:
+      "Browser fullscreen mode was exited.",
+
+    SHORTCUT:
+      "A restricted browser shortcut was pressed.",
+
+    CONTEXT_MENU:
+      "Context menu was requested during the exam."
+
   };
 
-  return descriptions[type] || "Exam security policy was triggered.";
+
+  return (
+    descriptions[type] ||
+    "Exam security policy was triggered."
+  );
+
 }
 
-async function logExamSecurityEvent(type, extra = {}) {
+
+async function logExamSecurityEvent(
+  type,
+  extra = {}
+) {
+
   const payload = {
-    examID: state.examID || "",
+
+    examID:
+      state.examID || "",
+
     studentName:
       state.exam?.studentName ||
       $("studentName")?.value?.trim() ||
       "",
-    violationNumber: examSecurity.violations,
-    eventType: type,
-    eventDescription: securityEventDescription(type),
-    eventTime: new Date().toISOString(),
-    visibilityState: document.visibilityState,
-    fullscreen: !!document.fullscreenElement,
-    userAgent: navigator.userAgent,
+
+    violationNumber:
+      examSecurity.violations,
+
+    eventType:
+      type,
+
+    eventDescription:
+      securityEventDescription(
+        type
+      ),
+
+    eventTime:
+      new Date().toISOString(),
+
+    visibilityState:
+      document.visibilityState,
+
+    fullscreen:
+      !!document.fullscreenElement,
+
+    userAgent:
+      navigator.userAgent,
+
     ...extra
+
   };
 
-  console.warn("NOOTECH EXAM SECURITY EVENT:", payload);
 
-  if (!EXAM_SECURITY_CONFIG.backendLogging || !state.examID) return;
+  console.warn(
+    "NOOTECH EXAM SECURITY EVENT:",
+    payload
+  );
+
+
+  if (
+    !EXAM_SECURITY_CONFIG.backendLogging ||
+    !state.examID
+  ) {
+
+    return;
+
+  }
+
 
   try {
+
     await gas(
       EXAM_SECURITY_CONFIG.backendLogFunction,
       [payload],
-      { maxAttempts: 1, timeoutMilliseconds: 10000 }
+      {
+        maxAttempts:
+          1,
+
+        timeoutMilliseconds:
+          10000
+      }
     );
+
   } catch (err) {
-    console.warn("NOOTECH security event could not be logged:", err);
+
+    console.warn(
+      "NOOTECH security event could not be logged:",
+      err
+    );
+
   }
+
 }
 
-function registerExamSecurityViolation(type, extra = {}) {
-  if (!isExamSecurityActive()) return;
 
-  const now = Date.now();
+/*
+ * ============================================================================
+ * SECURITY VIOLATION REGISTRATION
+ * ============================================================================
+ *
+ * IMPORTANT:
+ *
+ * This function is called ONLY by genuine security events.
+ *
+ * Answer selection does NOT call this function.
+ *
+ * Window blur does NOT call this function.
+ *
+ * Right-click does NOT call this function.
+ *
+ * Restricted keyboard shortcuts do NOT call this function.
+ * ============================================================================
+ */
+
+function registerExamSecurityViolation(
+  type,
+  extra = {}
+) {
 
   if (
-    now - examSecurity.startupAt <
+    !isExamSecurityActive()
+  ) {
+
+    return;
+
+  }
+
+
+  const now =
+    Date.now();
+
+
+  if (
+    now -
+    examSecurity.startupAt <
     EXAM_SECURITY_CONFIG.startupGraceMilliseconds
   ) {
+
     return;
+
   }
+
 
   if (
-    now - examSecurity.lastViolationAt <
+    now -
+    examSecurity.lastViolationAt <
     EXAM_SECURITY_CONFIG.violationDebounceMilliseconds
   ) {
+
     return;
+
   }
 
-  examSecurity.lastViolationAt = now;
-  examSecurity.violations += 1;
 
-  updateExamSecurityUI("SECURITY WARNING");
-  void logExamSecurityEvent(type, extra);
+  examSecurity.lastViolationAt =
+    now;
 
-  const count = examSecurity.violations;
-  const maximum = EXAM_SECURITY_CONFIG.maxViolations;
 
-  if (count >= maximum) {
-    if (examSecurity.autoSubmitting) return;
+  examSecurity.violations +=
+    1;
 
-    examSecurity.autoSubmitting = true;
-    updateExamSecurityUI("EXAM TERMINATING");
+
+  updateExamSecurityUI(
+    "SECURITY WARNING"
+  );
+
+
+  void logExamSecurityEvent(
+    type,
+    extra
+  );
+
+
+  const count =
+    examSecurity.violations;
+
+
+  const maximum =
+    EXAM_SECURITY_CONFIG.maxViolations;
+
+
+  if (
+    count >= maximum
+  ) {
+
+    if (
+      examSecurity.autoSubmitting
+    ) {
+
+      return;
+
+    }
+
+
+    examSecurity.autoSubmitting =
+      true;
+
+
+    updateExamSecurityUI(
+      "EXAM TERMINATING"
+    );
+
 
     showExamSecurityWarning(
       "SECURITY VIOLATION LIMIT REACHED — YOUR EXAM IS BEING SUBMITTED."
     );
 
-    window.setTimeout(() => {
-      if (!state.submitted && !state.submitting && state.examID) {
-        void doSubmit(true);
-      }
-    }, 700);
+
+    window.setTimeout(
+      () => {
+
+        if (
+          !state.submitted &&
+          !state.submitting &&
+          state.examID
+        ) {
+
+          void doSubmit(
+            true
+          );
+
+        }
+
+      },
+      700
+    );
+
 
     return;
+
   }
 
-  if (count === maximum - 1) {
+
+  if (
+    count ===
+    maximum - 1
+  ) {
+
     showExamSecurityWarning(
       `FINAL SECURITY WARNING — LEAVE THE EXAM WINDOW AGAIN AND THE EXAM WILL BE AUTO-SUBMITTED. (${count}/${maximum})`
     );
+
   } else {
+
     showExamSecurityWarning(
       `SECURITY WARNING — PLEASE REMAIN ON THE EXAM SCREEN. (${count}/${maximum})`
     );
+
   }
+
 }
+
+
+/*
+ * ============================================================================
+ * TAB / PAGE SWITCH
+ * ============================================================================
+ *
+ * THIS IS A REAL VIOLATION.
+ * ============================================================================
+ */
 
 function handleExamVisibilityChange() {
-  if (!isExamSecurityActive()) return;
 
-  if (document.visibilityState !== "visible") {
-    registerExamSecurityViolation("TAB_SWITCH");
+  if (
+    !isExamSecurityActive()
+  ) {
+
+    return;
+
   }
+
+
+  if (
+    document.visibilityState !==
+    "visible"
+  ) {
+
+    registerExamSecurityViolation(
+      "TAB_SWITCH"
+    );
+
+  }
+
 }
+
+
+/*
+ * ============================================================================
+ * WINDOW BLUR
+ * ============================================================================
+ *
+ * IMPORTANT:
+ * BLUR IS NOT A VIOLATION.
+ *
+ * Selecting an answer must never increment the security counter.
+ * ============================================================================
+ */
 
 function handleExamWindowBlur() {
-  /*
-   * Do NOT count blur as a violation. Clicking normal exam controls can
-   * legitimately cause focus changes in the browser.
-   */
-  if (!isExamSecurityActive()) return;
-  updateExamSecurityUI("SECURITY MONITORING ACTIVE");
+
+  if (
+    !isExamSecurityActive()
+  ) {
+
+    return;
+
+  }
+
+
+  updateExamSecurityUI(
+    "SECURITY MONITORING ACTIVE"
+  );
+
 }
 
+
+/*
+ * ============================================================================
+ * WINDOW FOCUS
+ * ========================================================================== */
+
 function handleExamWindowFocus() {
-  if (!isExamSecurityActive()) return;
+
+  if (
+    !isExamSecurityActive()
+  ) {
+
+    return;
+
+  }
+
 
   updateExamSecurityUI(
     examSecurity.violations > 0
       ? "SECURITY MONITORING ACTIVE"
       : "EXAM SECURITY ACTIVE"
   );
+
 }
+
+
+/*
+ * ============================================================================
+ * FULLSCREEN EXIT
+ * ============================================================================
+ *
+ * THIS IS A REAL VIOLATION.
+ * ============================================================================
+ */
 
 function handleExamFullscreenChange() {
-  if (!isExamSecurityActive()) return;
-  if (!examSecurity.fullscreenRequested) return;
 
-  if (!document.fullscreenElement) {
-    registerExamSecurityViolation("FULLSCREEN_EXIT");
+  if (
+    !isExamSecurityActive()
+  ) {
+
+    return;
+
   }
+
+
+  if (
+    !examSecurity.fullscreenRequested
+  ) {
+
+    return;
+
+  }
+
+
+  if (
+    !document.fullscreenElement
+  ) {
+
+    registerExamSecurityViolation(
+      "FULLSCREEN_EXIT"
+    );
+
+  }
+
 }
 
-function handleExamRestrictedKeyboard(event) {
+
+/*
+ * ============================================================================
+ * RESTRICTED KEYBOARD SHORTCUTS
+ * ============================================================================
+ *
+ * Shortcuts are BLOCKED.
+ *
+ * They are NOT violations.
+ * ============================================================================
+ */
+
+function handleExamRestrictedKeyboard(
+  event
+) {
+
   if (
     !isExamSecurityActive() ||
     !EXAM_SECURITY_CONFIG.blockBrowserShortcuts
   ) {
+
     return;
+
   }
 
-  const key = String(event.key || "").toLowerCase();
-  const ctrl = event.ctrlKey || event.metaKey;
-  const alt = event.altKey;
-  const shift = event.shiftKey;
 
-  let restricted = false;
+  const key =
+    String(
+      event.key || ""
+    ).toLowerCase();
 
-  if (ctrl && (key === "t" || key === "n" || key === "w")) {
-    restricted = true;
+
+  const ctrl =
+    event.ctrlKey ||
+    event.metaKey;
+
+
+  const alt =
+    event.altKey;
+
+
+  const shift =
+    event.shiftKey;
+
+
+  let restricted =
+    false;
+
+
+  if (
+    ctrl &&
+    (
+      key === "t" ||
+      key === "n" ||
+      key === "w"
+    )
+  ) {
+
+    restricted =
+      true;
+
   }
 
-  if (ctrl && shift && key === "t") {
-    restricted = true;
+
+  if (
+    ctrl &&
+    shift &&
+    key === "t"
+  ) {
+
+    restricted =
+      true;
+
   }
+
 
   if (
     key === "f12" ||
-    (ctrl && shift && (key === "i" || key === "j" || key === "c")) ||
-    (ctrl && key === "u")
+    (
+      ctrl &&
+      shift &&
+      (
+        key === "i" ||
+        key === "j" ||
+        key === "c"
+      )
+    ) ||
+    (
+      ctrl &&
+      key === "u"
+    )
   ) {
-    restricted = true;
+
+    restricted =
+      true;
+
   }
 
-  if (alt && (key === "arrowleft" || key === "arrowright")) {
-    restricted = true;
+
+  if (
+    alt &&
+    (
+      key === "arrowleft" ||
+      key === "arrowright"
+    )
+  ) {
+
+    restricted =
+      true;
+
   }
 
-  if (key === "f5" || (ctrl && key === "r")) {
-    restricted = true;
+
+  if (
+    key === "f5" ||
+    (
+      ctrl &&
+      key === "r"
+    )
+  ) {
+
+    restricted =
+      true;
+
   }
 
-  if (!restricted) return;
+
+  if (!restricted) {
+
+    return;
+
+  }
+
 
   event.preventDefault();
+
   event.stopPropagation();
 
-  /* Block the shortcut without counting it as a violation. */
-  updateExamSecurityUI("SECURITY MONITORING ACTIVE");
+
+  /*
+   * IMPORTANT:
+   *
+   * DO NOT call registerExamSecurityViolation().
+   */
+  updateExamSecurityUI(
+    "SECURITY MONITORING ACTIVE"
+  );
+
 }
 
-function handleExamContextMenu(event) {
-  if (!isExamSecurityActive()) return;
 
-  /* Disable context menu, but never count it as a security violation. */
+/*
+ * ============================================================================
+ * RIGHT CLICK
+ * ============================================================================
+ *
+ * Blocked only.
+ * NOT a violation.
+ * ============================================================================
+ */
+
+function handleExamContextMenu(
+  event
+) {
+
+  if (
+    !isExamSecurityActive()
+  ) {
+
+    return;
+
+  }
+
+
   event.preventDefault();
+
 }
 
-function handleExamBeforeUnload(event) {
-  if (!isExamSecurityActive()) return;
+
+/*
+ * ============================================================================
+ * BEFORE UNLOAD
+ * ========================================================================== */
+
+function handleExamBeforeUnload(
+  event
+) {
+
+  if (
+    !isExamSecurityActive()
+  ) {
+
+    return;
+
+  }
+
 
   event.preventDefault();
-  event.returnValue = "";
+
+  event.returnValue =
+    "";
+
 }
+
+
+/* ============================================================================
+ * 23. SECURITY LISTENER MANAGEMENT
+ * ========================================================================== */
 
 function installExamSecurityListeners() {
-  if (examSecurity.handlersInstalled) return;
 
-  examSecurity.boundVisibility = handleExamVisibilityChange;
-  examSecurity.boundBlur = handleExamWindowBlur;
-  examSecurity.boundFocus = handleExamWindowFocus;
-  examSecurity.boundFullscreen = handleExamFullscreenChange;
-  examSecurity.boundKeydown = handleExamRestrictedKeyboard;
-  examSecurity.boundContextMenu = handleExamContextMenu;
-  examSecurity.boundBeforeUnload = handleExamBeforeUnload;
+  if (
+    examSecurity.handlersInstalled
+  ) {
+
+    return;
+
+  }
+
+
+  examSecurity.boundVisibility =
+    handleExamVisibilityChange;
+
+
+  examSecurity.boundBlur =
+    handleExamWindowBlur;
+
+
+  examSecurity.boundFocus =
+    handleExamWindowFocus;
+
+
+  examSecurity.boundFullscreen =
+    handleExamFullscreenChange;
+
+
+  examSecurity.boundKeydown =
+    handleExamRestrictedKeyboard;
+
+
+  examSecurity.boundContextMenu =
+    handleExamContextMenu;
+
+
+  examSecurity.boundBeforeUnload =
+    handleExamBeforeUnload;
+
 
   document.addEventListener(
     "visibilitychange",
@@ -5891,8 +5215,20 @@ function installExamSecurityListeners() {
     true
   );
 
-  window.addEventListener("blur", examSecurity.boundBlur, true);
-  window.addEventListener("focus", examSecurity.boundFocus, true);
+
+  window.addEventListener(
+    "blur",
+    examSecurity.boundBlur,
+    true
+  );
+
+
+  window.addEventListener(
+    "focus",
+    examSecurity.boundFocus,
+    true
+  );
+
 
   document.addEventListener(
     "fullscreenchange",
@@ -5900,17 +5236,20 @@ function installExamSecurityListeners() {
     true
   );
 
+
   document.addEventListener(
     "keydown",
     examSecurity.boundKeydown,
     true
   );
 
+
   document.addEventListener(
     "contextmenu",
     examSecurity.boundContextMenu,
     true
   );
+
 
   window.addEventListener(
     "beforeunload",
@@ -5918,11 +5257,23 @@ function installExamSecurityListeners() {
     true
   );
 
-  examSecurity.handlersInstalled = true;
+
+  examSecurity.handlersInstalled =
+    true;
+
 }
 
+
 function uninstallExamSecurityListeners() {
-  if (!examSecurity.handlersInstalled) return;
+
+  if (
+    !examSecurity.handlersInstalled
+  ) {
+
+    return;
+
+  }
+
 
   document.removeEventListener(
     "visibilitychange",
@@ -5930,8 +5281,20 @@ function uninstallExamSecurityListeners() {
     true
   );
 
-  window.removeEventListener("blur", examSecurity.boundBlur, true);
-  window.removeEventListener("focus", examSecurity.boundFocus, true);
+
+  window.removeEventListener(
+    "blur",
+    examSecurity.boundBlur,
+    true
+  );
+
+
+  window.removeEventListener(
+    "focus",
+    examSecurity.boundFocus,
+    true
+  );
+
 
   document.removeEventListener(
     "fullscreenchange",
@@ -5939,11 +5302,13 @@ function uninstallExamSecurityListeners() {
     true
   );
 
+
   document.removeEventListener(
     "keydown",
     examSecurity.boundKeydown,
     true
   );
+
 
   document.removeEventListener(
     "contextmenu",
@@ -5951,50 +5316,219 @@ function uninstallExamSecurityListeners() {
     true
   );
 
+
   window.removeEventListener(
     "beforeunload",
     examSecurity.boundBeforeUnload,
     true
   );
 
-  examSecurity.handlersInstalled = false;
+
+  examSecurity.handlersInstalled =
+    false;
+
 }
+
+
+/* ============================================================================
+ * 24. SECURITY ACTIVATION / DEACTIVATION
+ * ========================================================================== */
 
 function activateExamSecurity() {
-  if (!EXAM_SECURITY_CONFIG.enabled || !state.examID) return;
 
-  examSecurity.active = true;
-  examSecurity.violations = 0;
-  examSecurity.lastViolationAt = 0;
-  examSecurity.startupAt = Date.now();
-  examSecurity.fullscreenRequested = false;
-  examSecurity.autoSubmitting = false;
+  if (
+    !EXAM_SECURITY_CONFIG.enabled ||
+    !state.examID
+  ) {
+
+    return;
+
+  }
+
+
+  examSecurity.active =
+    true;
+
+
+  examSecurity.violations =
+    0;
+
+
+  examSecurity.lastViolationAt =
+    0;
+
+
+  examSecurity.startupAt =
+    Date.now();
+
+
+  examSecurity.fullscreenRequested =
+    false;
+
+
+  examSecurity.autoSubmitting =
+    false;
+
 
   ensureExamSecurityUI();
-  updateExamSecurityUI("EXAM SECURITY ACTIVE");
+
+
+  updateExamSecurityUI(
+    "EXAM SECURITY ACTIVE"
+  );
+
+
   installExamSecurityListeners();
 
-  if (EXAM_SECURITY_CONFIG.requestFullscreen) {
+
+  if (
+    EXAM_SECURITY_CONFIG.requestFullscreen
+  ) {
+
     void requestExamFullscreen();
+
   }
+
 }
 
-function deactivateExamSecurity() {
-  examSecurity.active = false;
-  uninstallExamSecurityListeners();
-  examSecurity.autoSubmitting = false;
 
-  const status = $("nootechSecurityStatus");
-  if (status) status.remove();
+function deactivateExamSecurity() {
+
+  examSecurity.active =
+    false;
+
+
+  uninstallExamSecurityListeners();
+
+
+  examSecurity.autoSubmitting =
+    false;
+
+
+  const status =
+    $("nootechSecurityStatus");
+
+
+  if (status) {
+
+    status.remove();
+
+  }
+
 
   if (
     document.fullscreenElement &&
     typeof document.exitFullscreen === "function"
   ) {
-    document.exitFullscreen().catch(() => {});
+
+    document
+      .exitFullscreen()
+      .catch(
+        () => {}
+      );
+
   }
+
 }
+
+
+/* ============================================================================
+ * 25. FORM / APPLICATION EVENTS
+ * ========================================================================== */
+
+if ($("startForm")) {
+
+  $("startForm")
+    .addEventListener(
+      "submit",
+      initializeExam
+    );
+
+}
+
+
+/* ============================================================================
+ * 26. APPLICATION STARTUP
+ * ========================================================================== */
+
+wireHierarchyDropdowns();
+
+loadExamHierarchy();
+
+
+console.info(
+  "NOOTECH Online Exam frontend initialized."
+);
+
 
 console.info(
   "NOOTECH EXAM SECURITY: BROWSER FOCUS / TAB / FULLSCREEN MONITOR READY"
 );
+
+
+console.info(
+  "NOOTECH FINAL RESULT: SCORE + PERCENTAGE + STATISTICS ENABLED"
+);
+
+
+/* ============================================================================
+ * 27. DIAGNOSTIC
+ * ========================================================================== */
+
+function testBackendConfiguration() {
+
+  console.log(
+    "=============================================="
+  );
+
+
+  console.log(
+    "NOOTECH BACKEND CONFIGURATION TEST"
+  );
+
+
+  console.log(
+    "=============================================="
+  );
+
+
+  console.log(
+    "GAS_WEB_APP_URL:",
+    GAS_WEB_APP_URL
+  );
+
+
+  try {
+
+    assertConfig();
+
+
+    console.log(
+      "Configuration: PASSED"
+    );
+
+
+    console.log(
+      "API example:",
+      buildApiUrl(
+        "getExamHierarchy",
+        []
+      )
+    );
+
+
+  } catch (err) {
+
+    console.error(
+      "Configuration: FAILED",
+      err
+    );
+
+  }
+
+
+  console.log(
+    "=============================================="
+  );
+
+}
