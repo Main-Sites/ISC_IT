@@ -1638,11 +1638,6 @@ async function initializeExam(
       "examScreen"
     );
 
-    /*
-     * EXAM SECURITY
-     * Activate browser security immediately after the exam screen opens.
-     */
-    activateExamSecurity();
 
     loading(
       true,
@@ -3019,11 +3014,6 @@ async function doSubmit(
     state.submitted =
       true;
 
-    /*
-     * EXAM SECURITY
-     * Security monitoring is active only while the examination is active.
-     */
-    deactivateExamSecurity();
 
     window.clearInterval(
       state.timer
@@ -3136,101 +3126,95 @@ function normalizeResult(
  * The percentage is read from the authoritative backend result.
  * If it is unavailable, it is safely calculated from obtained/total marks.
  */
-async function showResult(
-  response
-) {
+
+/* ============================================================================
+ * 16. FINAL RESULT
+ * ========================================================================== */
+
+/**
+ * Displays ONLY the authoritative completed result returned by the backend.
+ *
+ * Flow:
+ *   submitExam()
+ *       -> backend evaluates answers
+ *       -> QUESTION_BANK supplies marks
+ *       -> EXAM_RECORDS stores ObtainedMarks / Percentage
+ *       -> getFinalExamResult()
+ *       -> this renderer
+ */
+async function showResult(response) {
 
   let result =
-    normalizeResult(
+    nootechNormalizeFinalResult(
       response
     );
 
-
   /*
-   * Fallback only:
-   *
-   * If submitExam() returned no usable result, retrieve the final result.
-   * This should normally NOT happen.
+   * Always obtain the final persisted result after submission.
+   * This prevents the UI from displaying an old/incomplete response.
    */
-  if (
-    !result ||
-    !(
-      "obtainedMarks" in result
-    ) ||
-    !(
-      "totalMarks" in result
-    )
-  ) {
+  try {
 
-    try {
-
-      result =
-        normalizeResult(
-          await gas(
-            "getFinalExamResult",
-            [
-              state.examID
-            ],
-            {
-              maxAttempts: 2,
-              timeoutMilliseconds: 25000
-            }
-          )
-        );
-
-    } catch (err) {
-
-      console.warn(
-        "Final result fallback request failed:",
-        err
+    const finalResponse =
+      await gas(
+        "getFinalExamResult",
+        [state.examID],
+        {
+          maxAttempts: 2,
+          timeoutMilliseconds: 30000
+        }
       );
 
+    const freshResult =
+      nootechNormalizeFinalResult(
+        finalResponse
+      );
+
+    if (
+      freshResult &&
+      typeof freshResult === "object"
+    ) {
+      result = freshResult;
     }
+
+  } catch (err) {
+
+    console.warn(
+      "Final result refresh failed; using submit response:",
+      err
+    );
 
   }
 
-
-  const studentName =
-    result.studentName ||
-    state.exam?.studentName ||
-    (
-      $("studentName")
-        ? $("studentName").value
-        : ""
-    );
-
-
-  const obtained =
+  const obtainedRaw =
     Number(
       result.obtainedMarks ??
-      result.score ??
-      0
+      result.score
     );
 
-
-  const total =
+  const totalRaw =
     Number(
       result.totalMarks ??
-      state.exam?.totalMarks ??
-      0
+      state.exam?.totalMarks
     );
 
+  const obtained =
+    Number.isFinite(obtainedRaw)
+      ? obtainedRaw
+      : 0;
+
+  const total =
+    Number.isFinite(totalRaw)
+      ? totalRaw
+      : 0;
 
   let percentage =
     Number(
       result.percentage
     );
 
-
-  /*
-   * Backend percentage is authoritative.
-   *
-   * Calculation is used only when the backend did not return a finite value.
-   */
   if (
-    !Number.isFinite(
-      percentage
-    )
+    !Number.isFinite(percentage)
   ) {
 
     percentage =
@@ -3238,86 +3222,88 @@ async function showResult(
         ? (
             obtained /
             total
-          ) *
-          100
+          ) * 100
         : 0;
 
   }
 
-
   percentage =
-    Math.max(
-      0,
-      Math.min(
-        100,
-        percentage
-      )
-    );
+    Math.round(
+      Math.max(
+        0,
+        Math.min(
+          100,
+          percentage
+        )
+      ) * 100
+    ) / 100;
 
+  const correct =
+    Number(result.correct) || 0;
 
-  if ($("resultStudent")) {
+  const wrong =
+    Number(result.wrong) || 0;
 
-    $("resultStudent")
-      .textContent =
-        studentName;
+  const unattempted =
+    Number(result.unattempted) || 0;
 
-  }
-
-
-  if ($("scorePercent")) {
-
-    $("scorePercent")
-      .textContent =
-        `${Math.round(percentage)}%`;
-
-  }
-
-
-  if ($("scoreValue")) {
-
-    $("scoreValue")
-      .textContent =
-        `${obtained} / ${total}`;
-
-  }
-
-
-  if ($("correctValue")) {
-
-    $("correctValue")
-      .textContent =
-        Number(
-          result.correct || 0
-        );
-
-  }
-
-
-  if ($("wrongValue")) {
-
-    $("wrongValue")
-      .textContent =
-        Number(
-          result.wrong || 0
-        );
-
-  }
-
-
-  if ($("unattemptedValue")) {
-
-    $("unattemptedValue")
-      .textContent =
-        Number(
-          result.unattempted || 0
-        );
-
-  }
-
+  const studentName =
+    String(
+      result.studentName ||
+      state.exam?.studentName ||
+      $("studentName")?.value ||
+      "CANDIDATE"
+    ).trim();
 
   /*
-   * The existing CSS uses --score for the circular result indicator.
+   * Store the authoritative result in state.
    */
+  state.exam =
+    {
+      ...(state.exam || {}),
+      ...result,
+      totalMarks: total,
+      obtainedMarks: obtained,
+      percentage: percentage,
+      correct: correct,
+      wrong: wrong,
+      unattempted: unattempted,
+      studentName: studentName
+    };
+
+  /*
+   * Render result screen.
+   */
+  if ($("resultStudent")) {
+    $("resultStudent").textContent =
+      studentName;
+  }
+
+  if ($("scorePercent")) {
+    $("scorePercent").textContent =
+      `${Math.round(percentage)}%`;
+  }
+
+  if ($("scoreValue")) {
+    $("scoreValue").textContent =
+      `${obtained} / ${total}`;
+  }
+
+  if ($("correctValue")) {
+    $("correctValue").textContent =
+      correct;
+  }
+
+  if ($("wrongValue")) {
+    $("wrongValue").textContent =
+      wrong;
+  }
+
+  if ($("unattemptedValue")) {
+    $("unattemptedValue").textContent =
+      unattempted;
+  }
+
   if (
     $("scorePercent") &&
     $("scorePercent").parentElement &&
@@ -3332,26 +3318,10 @@ async function showResult(
         "--score",
         `${percentage}%`
       );
-
   }
 
-
-  /*
-   * Preserve the result locally for possible review navigation.
-   */
-  state.exam =
-    {
-      ...(state.exam || {}),
-      ...result
-    };
-
-
-  show(
-    "resultScreen"
-  );
-
+  show("resultScreen");
 }
-
 
 /* ============================================================================
  * 17. DETAILED REVIEW
@@ -3998,7 +3968,7 @@ console.info(
  * https://search.google.com/local/writereview?placeid=XXXXXXXXXXXX
  */
 const GOOGLE_REVIEW_URL =
-  "https://g.page/r/CSPIVNfIi8ukEBM/review";
+  "PASTE_YOUR_GOOGLE_REVIEW_LINK_HERE";
 
 
 /* ============================================================================
@@ -4096,398 +4066,6 @@ function nootechNormalizeFinalResult(response) {
  * If submitExam() does not contain the complete score, getFinalExamResult()
  * is used as a fallback.
  */
-async function showResult(response) {
-
-  let result =
-    nootechNormalizeFinalResult(
-      response
-    );
-
-
-  /*
-   * ------------------------------------------------------------
-   * Check whether the response actually contains score data.
-   * ------------------------------------------------------------
-   */
-  let obtained =
-    Number(
-      result.obtainedMarks ??
-      result.score
-    );
-
-
-  let total =
-    Number(
-      result.totalMarks
-    );
-
-
-  /*
-   * ------------------------------------------------------------
-   * Fallback to the authoritative final-result endpoint.
-   * ------------------------------------------------------------
-   */
-  if (
-    !Number.isFinite(obtained) ||
-    !Number.isFinite(total)
-  ) {
-
-    try {
-
-      const finalResponse =
-        await gas(
-          "getFinalExamResult",
-          [
-            state.examID
-          ],
-          {
-            maxAttempts: 2,
-            timeoutMilliseconds: 30000
-          }
-        );
-
-
-      result =
-        nootechNormalizeFinalResult(
-          finalResponse
-        );
-
-
-      obtained =
-        Number(
-          result.obtainedMarks ??
-          result.score ??
-          0
-        );
-
-
-      total =
-        Number(
-          result.totalMarks ??
-          0
-        );
-
-    } catch (err) {
-
-      console.error(
-        "Unable to retrieve final result:",
-        err
-      );
-
-
-      /*
-       * Use the examination metadata as a final safe fallback.
-       */
-      obtained =
-        Number(
-          result.obtainedMarks ??
-          result.score ??
-          0
-        );
-
-
-      total =
-        Number(
-          result.totalMarks ??
-          state.exam?.totalMarks ??
-          0
-        );
-
-    }
-
-  }
-
-
-  if (
-    !Number.isFinite(obtained)
-  ) {
-
-    obtained =
-      0;
-
-  }
-
-
-  if (
-    !Number.isFinite(total)
-  ) {
-
-    total =
-      0;
-
-  }
-
-
-  /*
-   * ------------------------------------------------------------
-   * Candidate statistics.
-   * ------------------------------------------------------------
-   */
-  const correct =
-    Number(
-      result.correct ??
-      0
-    );
-
-
-  const wrong =
-    Number(
-      result.wrong ??
-      0
-    );
-
-
-  const unattempted =
-    Number(
-      result.unattempted ??
-      0
-    );
-
-
-  /*
-   * ------------------------------------------------------------
-   * Percentage.
-   *
-   * Backend value is preferred.
-   * Local calculation is only a fallback.
-   * ------------------------------------------------------------
-   */
-  let percentage =
-    Number(
-      result.percentage
-    );
-
-
-  if (
-    !Number.isFinite(
-      percentage
-    )
-  ) {
-
-    percentage =
-      total > 0
-        ? (
-            obtained /
-            total
-          ) *
-          100
-        : 0;
-
-  }
-
-
-  percentage =
-    Math.round(
-      Math.max(
-        0,
-        Math.min(
-          100,
-          percentage
-        )
-      ) *
-      100
-    ) / 100;
-
-
-  /*
-   * ------------------------------------------------------------
-   * Candidate name.
-   * ------------------------------------------------------------
-   */
-  const studentName =
-    String(
-      result.studentName ||
-      state.exam?.studentName ||
-      $("resultStudent")?.textContent ||
-      $("studentName")?.value ||
-      "CANDIDATE"
-    ).trim();
-
-
-  /*
-   * ------------------------------------------------------------
-   * Save complete result in state.
-   * ------------------------------------------------------------
-   */
-  state.exam =
-    {
-      ...(state.exam || {}),
-      ...result,
-
-      studentName:
-        studentName,
-
-      obtainedMarks:
-        obtained,
-
-      totalMarks:
-        total,
-
-      percentage:
-        percentage,
-
-      correct:
-        correct,
-
-      wrong:
-        wrong,
-
-      unattempted:
-        unattempted
-
-    };
-
-
-  /*
-   * ------------------------------------------------------------
-   * Populate every result field.
-   * ------------------------------------------------------------
-   */
-  if ($("resultStudent")) {
-
-    $("resultStudent")
-      .textContent =
-        studentName;
-
-  }
-
-
-  if ($("scorePercent")) {
-
-    $("scorePercent")
-      .textContent =
-        `${percentage}%`;
-
-  }
-
-
-  if ($("scoreValue")) {
-
-    $("scoreValue")
-      .textContent =
-        `${obtained} / ${total}`;
-
-  }
-
-
-  if ($("correctValue")) {
-
-    $("correctValue")
-      .textContent =
-        correct;
-
-  }
-
-
-  if ($("wrongValue")) {
-
-    $("wrongValue")
-      .textContent =
-        wrong;
-
-  }
-
-
-  if ($("unattemptedValue")) {
-
-    $("unattemptedValue")
-      .textContent =
-        unattempted;
-
-  }
-
-
-  /*
-   * ------------------------------------------------------------
-   * Update score-ring CSS custom property.
-   * ------------------------------------------------------------
-   */
-  const scoreRing =
-    document.querySelector(
-      "#resultScreen .score-ring"
-    );
-
-
-  if (scoreRing) {
-
-    scoreRing.style.setProperty(
-      "--score",
-      `${percentage}%`
-    );
-
-    scoreRing.style.setProperty(
-      "--percentage",
-      `${percentage}%`
-    );
-
-  }
-
-
-  /*
-   * Some UI themes use the ring's ::before background instead of
-   * --score. Inject a safe conic-gradient only when required.
-   *
-   * Existing theme colors remain inherited from CSS variables.
-   */
-  if (scoreRing) {
-
-    scoreRing.style.background =
-      `conic-gradient(
-        var(--accent, #00f0ff) ${percentage}%,
-        rgba(255,255,255,.08) ${percentage}% 100%
-      )`;
-
-  }
-
-
-  /*
-   * ------------------------------------------------------------
-   * Change the result button to the mandatory Google review step.
-   * ------------------------------------------------------------
-   */
-  if ($("reviewBtn")) {
-
-    $("reviewBtn")
-      .textContent =
-        "LEAVE GOOGLE REVIEW →";
-
-  }
-
-
-  /*
-   * ------------------------------------------------------------
-   * Show result FIRST.
-   * ------------------------------------------------------------
-   */
-  show(
-    "resultScreen"
-  );
-
-
-  window.scrollTo(
-    {
-      top: 0,
-      behavior: "smooth"
-    }
-  );
-
-
-  console.info(
-    "NOOTECH FINAL RESULT:",
-    {
-      studentName,
-      obtained,
-      total,
-      percentage,
-      correct,
-      wrong,
-      unattempted
-    }
-  );
-
-}
-
-
 /* ============================================================================
  * 22.4 GOOGLE REVIEW SCREEN CREATOR
  * ========================================================================== */
@@ -5504,497 +5082,3 @@ console.info(
   isGoogleReviewConfigured()
 );
 
-
-
-/* ============================================================================
- * 23. EXAM SECURITY / BROWSER FOCUS MONITOR
- * ============================================================================
- *
- * Browser-level exam security:
- * - Fullscreen request at exam start
- * - Tab/page visibility detection
- * - Window/application focus-loss detection
- * - Fullscreen-exit detection
- * - Common browser shortcut blocking
- * - Right-click blocking
- * - Violation counter and automatic submission
- * - Optional Apps Script security audit logging
- *
- * A normal web page cannot physically lock Windows or guarantee prevention of
- * Alt+Tab, Task Manager, another application, another monitor, etc.
- * True OS-level lockdown requires a managed kiosk browser/device.
- * ========================================================================== */
-
-const EXAM_SECURITY_CONFIG = {
-  enabled: true,
-  maxViolations: 3,
-  startupGraceMilliseconds: 2500,
-  violationDebounceMilliseconds: 1500,
-  requestFullscreen: true,
-  blockBrowserShortcuts: true,
-  backendLogging: true,
-  backendLogFunction: "logExamSecurityViolation"
-};
-
-const examSecurity = {
-  active: false,
-  violations: 0,
-  lastViolationAt: 0,
-  startupAt: 0,
-  fullscreenRequested: false,
-  handlersInstalled: false,
-  autoSubmitting: false,
-  boundVisibility: null,
-  boundBlur: null,
-  boundFocus: null,
-  boundFullscreen: null,
-  boundKeydown: null,
-  boundContextMenu: null,
-  boundBeforeUnload: null
-};
-
-function isExamSecurityActive() {
-  return (
-    EXAM_SECURITY_CONFIG.enabled === true &&
-    examSecurity.active === true &&
-    !!state.examID &&
-    state.submitted === false &&
-    state.submitting === false
-  );
-}
-
-function ensureExamSecurityUI() {
-  if ($("nootechSecurityStatus")) return;
-
-  const examScreen = $("examScreen");
-  if (!examScreen) return;
-
-  const status = document.createElement("div");
-  status.id = "nootechSecurityStatus";
-
-  status.innerHTML = `
-    <span class="nootech-security-dot"></span>
-    <span class="nootech-security-text">EXAM SECURITY ACTIVE</span>
-    <span class="nootech-security-count">VIOLATIONS: 0/${EXAM_SECURITY_CONFIG.maxViolations}</span>
-  `;
-
-  status.style.cssText = `
-    position:fixed;
-    right:16px;
-    bottom:16px;
-    z-index:9998;
-    display:flex;
-    align-items:center;
-    gap:8px;
-    padding:9px 12px;
-    border:1px solid rgba(255,255,255,.18);
-    border-radius:10px;
-    background:rgba(8,12,20,.92);
-    color:#fff;
-    font:700 11px/1.2 Arial,sans-serif;
-    letter-spacing:.5px;
-    box-shadow:0 8px 24px rgba(0,0,0,.28);
-    pointer-events:none;
-    backdrop-filter:blur(8px);
-  `;
-
-  const dot = status.querySelector(".nootech-security-dot");
-  if (dot) {
-    dot.style.cssText = `
-      width:8px;height:8px;border-radius:50%;
-      background:#22c55e;
-      box-shadow:0 0 10px rgba(34,197,94,.8);
-      flex:0 0 auto;
-    `;
-  }
-
-  examScreen.appendChild(status);
-}
-
-function updateExamSecurityUI(message = "") {
-  const status = $("nootechSecurityStatus");
-  if (!status) return;
-
-  const countNode = status.querySelector(".nootech-security-count");
-  const textNode = status.querySelector(".nootech-security-text");
-  const dot = status.querySelector(".nootech-security-dot");
-
-  if (countNode) {
-    countNode.textContent =
-      `VIOLATIONS: ${examSecurity.violations}/${EXAM_SECURITY_CONFIG.maxViolations}`;
-  }
-
-  if (message && textNode) {
-    textNode.textContent = message;
-  }
-
-  if (dot) {
-    if (examSecurity.violations >= EXAM_SECURITY_CONFIG.maxViolations) {
-      dot.style.background = "#ef4444";
-      dot.style.boxShadow = "0 0 10px rgba(239,68,68,.9)";
-    } else if (examSecurity.violations > 0) {
-      dot.style.background = "#f59e0b";
-      dot.style.boxShadow = "0 0 10px rgba(245,158,11,.9)";
-    } else {
-      dot.style.background = "#22c55e";
-      dot.style.boxShadow = "0 0 10px rgba(34,197,94,.8)";
-    }
-  }
-}
-
-function showExamSecurityWarning(message) {
-  try {
-    toast(message);
-  } catch (err) {
-    console.warn("Security warning:", message);
-  }
-}
-
-async function requestExamFullscreen() {
-  if (
-    !EXAM_SECURITY_CONFIG.requestFullscreen ||
-    !document.documentElement ||
-    typeof document.documentElement.requestFullscreen !== "function"
-  ) {
-    return false;
-  }
-
-  if (document.fullscreenElement) {
-    examSecurity.fullscreenRequested = true;
-    return true;
-  }
-
-  try {
-    await document.documentElement.requestFullscreen();
-    examSecurity.fullscreenRequested = true;
-    return true;
-  } catch (err) {
-    console.warn("NOOTECH fullscreen request was denied:", err);
-    return false;
-  }
-}
-
-function securityEventDescription(type) {
-  const descriptions = {
-    TAB_SWITCH: "Browser tab or page visibility changed.",
-    WINDOW_BLUR: "Exam browser window lost focus.",
-    FULLSCREEN_EXIT: "Browser fullscreen mode was exited.",
-    SHORTCUT: "A restricted browser shortcut was pressed.",
-    CONTEXT_MENU: "Context menu was requested during the exam."
-  };
-
-  return descriptions[type] || "Exam security policy was triggered.";
-}
-
-async function logExamSecurityEvent(type, extra = {}) {
-  const payload = {
-    examID: state.examID || "",
-    studentName:
-      state.exam?.studentName ||
-      $("studentName")?.value?.trim() ||
-      "",
-    violationNumber: examSecurity.violations,
-    eventType: type,
-    eventDescription: securityEventDescription(type),
-    eventTime: new Date().toISOString(),
-    visibilityState: document.visibilityState,
-    fullscreen: !!document.fullscreenElement,
-    userAgent: navigator.userAgent,
-    ...extra
-  };
-
-  console.warn("NOOTECH EXAM SECURITY EVENT:", payload);
-
-  if (!EXAM_SECURITY_CONFIG.backendLogging || !state.examID) return;
-
-  try {
-    await gas(
-      EXAM_SECURITY_CONFIG.backendLogFunction,
-      [payload],
-      { maxAttempts: 1, timeoutMilliseconds: 10000 }
-    );
-  } catch (err) {
-    console.warn("NOOTECH security event could not be logged:", err);
-  }
-}
-
-function registerExamSecurityViolation(type, extra = {}) {
-  if (!isExamSecurityActive()) return;
-
-  const now = Date.now();
-
-  if (
-    now - examSecurity.startupAt <
-    EXAM_SECURITY_CONFIG.startupGraceMilliseconds
-  ) {
-    return;
-  }
-
-  if (
-    now - examSecurity.lastViolationAt <
-    EXAM_SECURITY_CONFIG.violationDebounceMilliseconds
-  ) {
-    return;
-  }
-
-  examSecurity.lastViolationAt = now;
-  examSecurity.violations += 1;
-
-  updateExamSecurityUI("SECURITY WARNING");
-  void logExamSecurityEvent(type, extra);
-
-  const count = examSecurity.violations;
-  const maximum = EXAM_SECURITY_CONFIG.maxViolations;
-
-  if (count >= maximum) {
-    if (examSecurity.autoSubmitting) return;
-
-    examSecurity.autoSubmitting = true;
-    updateExamSecurityUI("EXAM TERMINATING");
-
-    showExamSecurityWarning(
-      "SECURITY VIOLATION LIMIT REACHED — YOUR EXAM IS BEING SUBMITTED."
-    );
-
-    window.setTimeout(() => {
-      if (!state.submitted && !state.submitting && state.examID) {
-        void doSubmit(true);
-      }
-    }, 700);
-
-    return;
-  }
-
-  if (count === maximum - 1) {
-    showExamSecurityWarning(
-      `FINAL SECURITY WARNING — LEAVE THE EXAM WINDOW AGAIN AND THE EXAM WILL BE AUTO-SUBMITTED. (${count}/${maximum})`
-    );
-  } else {
-    showExamSecurityWarning(
-      `SECURITY WARNING — PLEASE REMAIN ON THE EXAM SCREEN. (${count}/${maximum})`
-    );
-  }
-}
-
-function handleExamVisibilityChange() {
-  if (!isExamSecurityActive()) return;
-
-  if (document.visibilityState !== "visible") {
-    registerExamSecurityViolation("TAB_SWITCH");
-  }
-}
-
-function handleExamWindowBlur() {
-  /*
-   * Do NOT count blur as a violation. Clicking normal exam controls can
-   * legitimately cause focus changes in the browser.
-   */
-  if (!isExamSecurityActive()) return;
-  updateExamSecurityUI("SECURITY MONITORING ACTIVE");
-}
-
-function handleExamWindowFocus() {
-  if (!isExamSecurityActive()) return;
-
-  updateExamSecurityUI(
-    examSecurity.violations > 0
-      ? "SECURITY MONITORING ACTIVE"
-      : "EXAM SECURITY ACTIVE"
-  );
-}
-
-function handleExamFullscreenChange() {
-  if (!isExamSecurityActive()) return;
-  if (!examSecurity.fullscreenRequested) return;
-
-  if (!document.fullscreenElement) {
-    registerExamSecurityViolation("FULLSCREEN_EXIT");
-  }
-}
-
-function handleExamRestrictedKeyboard(event) {
-  if (
-    !isExamSecurityActive() ||
-    !EXAM_SECURITY_CONFIG.blockBrowserShortcuts
-  ) {
-    return;
-  }
-
-  const key = String(event.key || "").toLowerCase();
-  const ctrl = event.ctrlKey || event.metaKey;
-  const alt = event.altKey;
-  const shift = event.shiftKey;
-
-  let restricted = false;
-
-  if (ctrl && (key === "t" || key === "n" || key === "w")) {
-    restricted = true;
-  }
-
-  if (ctrl && shift && key === "t") {
-    restricted = true;
-  }
-
-  if (
-    key === "f12" ||
-    (ctrl && shift && (key === "i" || key === "j" || key === "c")) ||
-    (ctrl && key === "u")
-  ) {
-    restricted = true;
-  }
-
-  if (alt && (key === "arrowleft" || key === "arrowright")) {
-    restricted = true;
-  }
-
-  if (key === "f5" || (ctrl && key === "r")) {
-    restricted = true;
-  }
-
-  if (!restricted) return;
-
-  event.preventDefault();
-  event.stopPropagation();
-
-  /* Block the shortcut without counting it as a violation. */
-  updateExamSecurityUI("SECURITY MONITORING ACTIVE");
-}
-
-function handleExamContextMenu(event) {
-  if (!isExamSecurityActive()) return;
-
-  /* Disable context menu, but never count it as a security violation. */
-  event.preventDefault();
-}
-
-function handleExamBeforeUnload(event) {
-  if (!isExamSecurityActive()) return;
-
-  event.preventDefault();
-  event.returnValue = "";
-}
-
-function installExamSecurityListeners() {
-  if (examSecurity.handlersInstalled) return;
-
-  examSecurity.boundVisibility = handleExamVisibilityChange;
-  examSecurity.boundBlur = handleExamWindowBlur;
-  examSecurity.boundFocus = handleExamWindowFocus;
-  examSecurity.boundFullscreen = handleExamFullscreenChange;
-  examSecurity.boundKeydown = handleExamRestrictedKeyboard;
-  examSecurity.boundContextMenu = handleExamContextMenu;
-  examSecurity.boundBeforeUnload = handleExamBeforeUnload;
-
-  document.addEventListener(
-    "visibilitychange",
-    examSecurity.boundVisibility,
-    true
-  );
-
-  window.addEventListener("blur", examSecurity.boundBlur, true);
-  window.addEventListener("focus", examSecurity.boundFocus, true);
-
-  document.addEventListener(
-    "fullscreenchange",
-    examSecurity.boundFullscreen,
-    true
-  );
-
-  document.addEventListener(
-    "keydown",
-    examSecurity.boundKeydown,
-    true
-  );
-
-  document.addEventListener(
-    "contextmenu",
-    examSecurity.boundContextMenu,
-    true
-  );
-
-  window.addEventListener(
-    "beforeunload",
-    examSecurity.boundBeforeUnload,
-    true
-  );
-
-  examSecurity.handlersInstalled = true;
-}
-
-function uninstallExamSecurityListeners() {
-  if (!examSecurity.handlersInstalled) return;
-
-  document.removeEventListener(
-    "visibilitychange",
-    examSecurity.boundVisibility,
-    true
-  );
-
-  window.removeEventListener("blur", examSecurity.boundBlur, true);
-  window.removeEventListener("focus", examSecurity.boundFocus, true);
-
-  document.removeEventListener(
-    "fullscreenchange",
-    examSecurity.boundFullscreen,
-    true
-  );
-
-  document.removeEventListener(
-    "keydown",
-    examSecurity.boundKeydown,
-    true
-  );
-
-  document.removeEventListener(
-    "contextmenu",
-    examSecurity.boundContextMenu,
-    true
-  );
-
-  window.removeEventListener(
-    "beforeunload",
-    examSecurity.boundBeforeUnload,
-    true
-  );
-
-  examSecurity.handlersInstalled = false;
-}
-
-function activateExamSecurity() {
-  if (!EXAM_SECURITY_CONFIG.enabled || !state.examID) return;
-
-  examSecurity.active = true;
-  examSecurity.violations = 0;
-  examSecurity.lastViolationAt = 0;
-  examSecurity.startupAt = Date.now();
-  examSecurity.fullscreenRequested = false;
-  examSecurity.autoSubmitting = false;
-
-  ensureExamSecurityUI();
-  updateExamSecurityUI("EXAM SECURITY ACTIVE");
-  installExamSecurityListeners();
-
-  if (EXAM_SECURITY_CONFIG.requestFullscreen) {
-    void requestExamFullscreen();
-  }
-}
-
-function deactivateExamSecurity() {
-  examSecurity.active = false;
-  uninstallExamSecurityListeners();
-  examSecurity.autoSubmitting = false;
-
-  const status = $("nootechSecurityStatus");
-  if (status) status.remove();
-
-  if (
-    document.fullscreenElement &&
-    typeof document.exitFullscreen === "function"
-  ) {
-    document.exitFullscreen().catch(() => {});
-  }
-}
-
-console.info(
-  "NOOTECH EXAM SECURITY: BROWSER FOCUS / TAB / FULLSCREEN MONITOR READY"
-);
