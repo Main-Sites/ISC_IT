@@ -61,7 +61,7 @@ const GAS_WEB_APP_URL =
  * ========================================================================== */
 
 const GOOGLE_REVIEW_URL =
-  "PASTE_YOUR_GOOGLE_REVIEW_LINK_HERE";
+  "https://search.google.com/local/writereview?placeid=ChIJAYpCyX6gRYARI8hU18iLy6Q";
 
 
 /* ============================================================================
