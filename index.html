@@ -9,6 +9,13 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;600;700;800&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
+  <style>
+    .access-code-panel { margin-top: 14px; padding: 14px; border: 1px solid rgba(90, 220, 255, .35); border-radius: 12px; background: rgba(10, 25, 45, .55); }
+    .access-code-panel.hidden { display: none; }
+    .access-code-hint { margin: 8px 0 0; color: #9fb6ca; font-size: 12px; line-height: 1.5; }
+    #examAccessCode { letter-spacing: .12em; }
+  </style>
+
 </head>
 <body>
   <div class="scanlines"></div>
@@ -42,7 +49,13 @@
             <label>CHAPTER<select id="chapter" required disabled><option value="">SELECT CHAPTER</option></select></label>
           </div>
           <label>QUESTIONS<input id="questionCount" type="number" min="1" value="20"></label>
-          <button class="primary-btn" type="submit">INITIALIZE EXAM <span>→</span></button>
+          <button id="startExamBtn" class="primary-btn" type="submit">CONTINUE <span>→</span></button>
+          <div id="accessCodePanel" class="access-code-panel hidden">
+            <label for="examAccessCode">EXAM ACCESS CODE
+              <input id="examAccessCode" type="password" autocomplete="off" placeholder="Enter exam access code" disabled>
+            </label>
+            <p class="access-code-hint">Enter the code provided by your examination administrator to unlock the exam.</p>
+          </div>
           <div id="startError" class="error-box hidden"></div>
         </form>
       </div>
@@ -128,7 +141,7 @@
       <div class="footer-brand">
         <div class="footer-brand-mark">NTC</div>
         <div>
-          <div class="eyebrow">NOOTECH // DIGITAL LEARNING</div>
+          <div class="eyebrow">NOOTECH / DIGITAL LEARNING</div>
           <h3>ONLINE <span>EXAM</span></h3>
         </div>
         <p>Learn. Practice. Compete. A modern examination experience powered by NOOTECH COMPUTER CENTRE.</p>
@@ -151,11 +164,11 @@
         <div class="footer-title">CONNECT</div>
         <div class="social-links">
           <!-- Replace # with official NOOTECH social URLs -->
-          <a href="https://www.facebook.com/profile.php?id=61567543754358" target="_blank" rel="noopener" aria-label="Facebook">f</a>
-          <a href="https://www.instagram.com/nootechcomputercentre/?hl=en" target="_blank" rel="noopener" aria-label="Instagram">◎</a>
+          <a href="https://www.facebook.com/profile.php?id=61567543754358" target="_blank" rel="noopener" aria-label="https://www.facebook.com/nootechcomputercentre">f</a>
+          <a href="https://www.instagram.com/nootechcomputercentre/?hl=en" target="_blank" rel="noopener" aria-label="https://www.instagram.com/nootechcomputercentre/?hl=en">◎</a>
           <a href="#" target="_blank" rel="noopener" aria-label="YouTube">▶</a>
           <a href="#" target="_blank" rel="noopener" aria-label="LinkedIn">in</a>
-          <a href="#" target="_blank" rel="noopener" aria-label="WhatsApp">◉</a>
+          <a href="#" target="_blank" rel="noopener" aria-label="9853895452">◉</a>
           <a href="#" target="_blank" rel="noopener" aria-label="Telegram">➤</a>
         </div>
         <div class="footer-status"><i></i> NOOTECH ALL SYSTEMS OPERATIONAL</div>
