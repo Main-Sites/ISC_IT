@@ -47,44 +47,5 @@ button{font:700 12px Cambria;letter-spacing:.08em;cursor:pointer;border:0;transi
     object-fit: contain;
     display: block;
 }   
-/* ===================== GOOGLE REVIEW ===================== */
-
-.review-section {
-    text-align: center;
-    padding: 35px 20px;
-    margin: 25px auto;
-    background: linear-gradient(135deg, #111827, #1e293b);
-    border: 1px solid #334155;
-    border-radius: 18px;
-    color: #ffffff;
-    max-width: 650px;
-}
-
-.review-section h2 {
-    color: #facc15;
-    margin-bottom: 12px;
-}
-
-.review-section p {
-    color: #cbd5e1;
-    line-height: 1.7;
-    margin-bottom: 25px;
-}
-
-.google-review-btn {
-    display: inline-block;
-    padding: 14px 25px;
-    background: linear-gradient(135deg, #f59e0b, #facc15);
-    color: #111827;
-    text-decoration: none;
-    font-weight: 700;
-    border-radius: 50px;
-    transition: 0.3s ease;
-}
-
-.google-review-btn:hover {
-    transform: translateY(-3px);
-    box-shadow: 0 8px 20px rgba(250, 204, 21, 0.3);
-}
                        
                        }
