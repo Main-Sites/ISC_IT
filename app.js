@@ -68,6 +68,8 @@ const GOOGLE_REVIEW_URL =
  * 3. GLOBAL EXAM STATE
  * ========================================================================== */
 
+let accessCodeStepReady = false;
+
 const state = {
 
   examID: null,
@@ -1344,9 +1346,58 @@ async function initializeExam(
     }
 
 
+    const accessCode =
+      $("examAccessCode")
+        ? $("examAccessCode").value.trim()
+        : "";
+
+
+    if (!accessCode) {
+      throw new Error("Please enter the exam access code.");
+    }
+
+
     loading(
       true,
-      "INITIALIZING EXAM…"
+      "VERIFYING EXAM ACCESS CODE…"
+    );
+
+
+    const accessResult =
+      await gas(
+        "verifyExamAccessCode",
+        [accessCode],
+        {
+          maxAttempts: 2,
+          timeoutMilliseconds: 20000
+        }
+      );
+
+
+    const accessGranted =
+      accessResult === true ||
+      accessResult?.valid === true ||
+      accessResult?.authorized === true;
+
+
+    const accessToken =
+      accessResult &&
+      typeof accessResult === "object"
+        ? String(accessResult.accessToken || "")
+        : "";
+
+
+    if (!accessGranted || !accessToken) {
+      throw new Error(
+        accessResult?.message ||
+        "Invalid exam access code. Please contact your examination administrator."
+      );
+    }
+
+
+    loading(
+      true,
+      "ACCESS VERIFIED. INITIALIZING EXAM…"
     );
 
 
@@ -1359,7 +1410,8 @@ async function initializeExam(
           year,
           unit,
           chapter,
-          questionCount
+          questionCount,
+          accessToken
         ],
         {
           maxAttempts: 2,
@@ -5441,7 +5493,55 @@ if ($("startForm")) {
   $("startForm")
     .addEventListener(
       "submit",
-      initializeExam
+      event => {
+
+        if (!accessCodeStepReady) {
+          event.preventDefault();
+
+          error("startError", "");
+
+          const studentName = $("studentName").value.trim();
+          const stream = $("stream").value.trim();
+          const year = $("year").value.trim();
+          const unit = $("unit").value.trim();
+          const chapter = $("chapter").value.trim();
+          const questionCount = Number($("questionCount").value);
+
+          if (!studentName) {
+            error("startError", "Student name is required.");
+            $("studentName").focus();
+            return;
+          }
+
+          if (!stream || !year || !unit || !chapter) {
+            error("startError", "Please select Stream, Year, Unit and Chapter.");
+            return;
+          }
+
+          if (!Number.isInteger(questionCount) || questionCount < 1) {
+            error("startError", "Please enter a valid question count.");
+            $("questionCount").focus();
+            return;
+          }
+
+          accessCodeStepReady = true;
+
+          const panel = $("accessCodePanel");
+          const codeInput = $("examAccessCode");
+          const button = $("startExamBtn");
+
+          panel.classList.remove("hidden");
+          codeInput.disabled = false;
+          codeInput.required = true;
+          button.innerHTML = 'VERIFY CODE & START EXAM <span>→</span>';
+
+          codeInput.focus();
+          return;
+        }
+
+        initializeExam(event);
+
+      }
     );
 
 }
@@ -5531,4 +5631,18 @@ function testBackendConfiguration() {
     "=============================================="
   );
 
+}
+
+
+if ($("restartBtn")) {
+  $("restartBtn").addEventListener("click", () => {
+    accessCodeStepReady = false;
+    if ($("accessCodePanel")) $("accessCodePanel").classList.add("hidden");
+    if ($("examAccessCode")) {
+      $("examAccessCode").value = "";
+      $("examAccessCode").disabled = true;
+      $("examAccessCode").required = false;
+    }
+    if ($("startExamBtn")) $("startExamBtn").innerHTML = 'CONTINUE <span>→</span>';
+  });
 }
