@@ -40,4 +40,11 @@ button{font:700 12px Cambria;letter-spacing:.08em;cursor:pointer;border:0;transi
 .footer-status{display:flex;align-items:center;gap:8px;color:#64738c;font:600 8px Cambria;letter-spacing:.08em}.footer-status i{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 10px var(--green)}
 .footer-bottom{position:relative;border-top:1px solid #1c2740;min-height:58px;display:flex;justify-content:center;align-items:center;gap:14px;flex-wrap:wrap;color:#56647b;font:600 8px Cambria;letter-spacing:.1em}.footer-separator{color:#33415e;font-size:7px}
 @media(max-width:900px){.footer-grid{grid-template-columns:1.5fr 1fr 1fr}.footer-column:last-child{grid-column:2/4}}
-@media(max-width:600px){.site-footer{padding-top:35px}.footer-grid{grid-template-columns:1fr 1fr;gap:25px}.footer-brand{grid-column:1/-1}.footer-column:last-child{grid-column:auto}.footer-bottom{padding:16px 0;text-align:center}}
+@media(max-width:600px){.site-footer{padding-top:35px}.footer-grid{grid-template-columns:1fr 1fr;gap:25px}.footer-brand{grid-column:1/-1}.footer-column:last-child{grid-column:auto}.footer-bottom{padding:16px 0;text-align:center}
+ .brand-logo {
+    width: 50px;
+    height: 50px;
+    object-fit: contain;
+    display: block;
+}                      
+                       }
