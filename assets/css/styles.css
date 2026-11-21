@@ -47,5 +47,155 @@ button{font:700 12px Cambria;letter-spacing:.08em;cursor:pointer;border:0;transi
     object-fit: contain;
     display: block;
 }   
+
+/* =========================================
+   CONTINUOUS PROMOTIONAL MARQUEE
+   NOOTECH MOCK TEST PORTAL
+   Theme: Electric Cyan + Dark Navy
+========================================= */
+
+/* Main Marquee Container */
+
+.marq {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+
+    margin: 0 0 10px;
+    padding: 10px 0;
+
+    background: rgba(8, 18, 38, 0.72);
+
+    border-top: 1px solid rgba(0, 229, 255, 0.25);
+    border-bottom: 1px solid rgba(0, 229, 255, 0.25);
+
+    border-radius: 8px;
+
+    box-shadow:
+        0 4px 18px rgba(0, 0, 0, 0.18),
+        inset 0 0 15px rgba(0, 229, 255, 0.05);
+}
+
+
+/* Scrolling Track */
+
+.marq-track {
+    display: flex;
+    width: max-content;
+    flex-shrink: 0;
+
+    animation: smooth-marquee 28s linear infinite;
+}
+
+
+/* Individual Text Group */
+
+.marq-content {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+
+    gap: 22px;
+    padding-right: 22px;
+
+    white-space: nowrap;
+}
+
+
+/* Marquee Text */
+
+.marq-content span {
+    color: #00E5FF;
+
+    font-family: "Space Grotesk", sans-serif;
+
+    font-size: clamp(14px, 1.5vw, 18px);
+
+    font-weight: 700;
+
+    line-height: 1.4;
+
+    letter-spacing: 0.6px;
+
+    text-shadow:
+        0 0 5px rgba(0, 229, 255, 0.45),
+        0 0 12px rgba(0, 229, 255, 0.30);
+}
+
+
+/* Orange Separator */
+
+.marq-content .marq-separator {
+    color: #FF9F43;
+
+    font-weight: 800;
+
+    text-shadow:
+        0 0 6px rgba(255, 159, 67, 0.35);
+}
+
+
+/* Continuous Animation */
+
+@keyframes smooth-marquee {
+
+    0% {
+        transform: translateX(0);
+    }
+
+    100% {
+        transform: translateX(-50%);
+    }
+
+}
+
+
+/* Pause Animation on Mouse Hover */
+
+.marq:hover .marq-track {
+    animation-play-state: paused;
+}
+
+
+/* Mobile Responsive */
+
+@media (max-width: 600px) {
+
+    .marq {
+        padding: 9px 0;
+
+        margin-bottom: 8px;
+
+        border-radius: 6px;
+    }
+
+    .marq-content {
+        gap: 15px;
+
+        padding-right: 15px;
+    }
+
+    .marq-content span {
+        font-size: 13px;
+
+        letter-spacing: 0.3px;
+    }
+
+}
+
+
+/* Accessibility - Reduced Motion */
+
+@media (prefers-reduced-motion: reduce) {
+
+    .marq-track {
+        animation: none;
+
+        transform: none;
+    }
+
+}
+  
                        
-                       }
+                     
